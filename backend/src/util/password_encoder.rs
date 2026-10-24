@@ -24,6 +24,34 @@ impl PasswordEncoder {
             password == legacy_sha3(raw_password)
         }
     }
+
+    /// 异步版 [`Self::verify`]：bcrypt 在默认 cost(12) 下单次约 200~300ms **纯 CPU**，
+    /// 直接在 async handler 里调用会把 actix worker 线程（数量 = CPU 核数）占满，
+    /// 十几个并发登录就能让整个服务无响应。因此统一下沉到 tokio 阻塞线程池。
+    pub async fn verify_async(password: &str, raw_password: &str) -> bool {
+        let password = password.to_string();
+        let raw_password = raw_password.to_string();
+        match tokio::task::spawn_blocking(move || PasswordEncoder::verify(&password, &raw_password)).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("[password] verify task join failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// 异步版 [`Self::encode`]，理由同 [`Self::verify_async`]。
+    pub async fn encode_async(raw_password: &str) -> String {
+        let raw = raw_password.to_string();
+        let fallback = raw.clone();
+        match tokio::task::spawn_blocking(move || PasswordEncoder::encode(&raw)).await {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("[password] encode task join failed: {e}");
+                legacy_sha3(&fallback)
+            }
+        }
+    }
 }
 
 /// 判断是否 bcrypt 哈希（便于新旧兼容）

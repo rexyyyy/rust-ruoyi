@@ -91,11 +91,13 @@ pub async fn update_pwd(req: HttpRequest, arg: web::Query<PasswordUpdateDTO>) ->
     }
 
 
-    if !PasswordEncoder::verify(user.password.as_ref().unwrap(), &old_password.clone().unwrap()) {
+    // bcrypt 校验是 200ms+ 的纯 CPU 操作，必须下沉到阻塞线程池，否则会占死 worker 线程
+    if !PasswordEncoder::verify_async(user.password.as_ref().unwrap(), &old_password.clone().unwrap()).await {
         return RespVO::<u64>::from_error_info(500, "修改密码失败，旧密码错误").resp_json();
     }
+    let encoded = PasswordEncoder::encode_async(new_password.as_ref().unwrap()).await;
     let vo = CONTEXT.sys_user_service.update_password(
-        &PasswordEncoder::encode(new_password.as_ref().unwrap()), &user_cache.id.to_string()).await;
+        &encoded, &user_cache.id.to_string()).await;
     return RespVO::from_result(&vo).resp_json();
 }
 

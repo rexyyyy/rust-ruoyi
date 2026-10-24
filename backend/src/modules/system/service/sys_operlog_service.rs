@@ -8,7 +8,6 @@ use crate::error::Result;
 use crate::pool;
 use sea_orm::entity::*;
 use sea_orm::query::*;
-use sea_orm::*;
 use crate::modules::system::dao::*;
 
 /// 操作日志服务（对应 Spring SysOperLogServiceImpl）
@@ -17,8 +16,28 @@ pub struct SysOperlogService {}
 impl SysOperlogService {
     pub async fn page(&self, arg: &OperLogPageDTO) -> Result<Page<SysOperLogVO>> {
         let page_req = &PageRequest::from(arg);
-        let select = SysOperLogEntity::find()
-            .order_by_desc(SysOperLogColumn::OperTime);
+        // 原实现完全忽略 DTO 过滤条件（前端搜索框无效），此处补齐模块/操作人/类型/状态/时间范围
+        let mut select = SysOperLogEntity::find();
+        if let Some(t) = arg.title.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            select = select.filter(SysOperLogColumn::Title.contains(t));
+        }
+        if let Some(op) = arg.oper_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            select = select.filter(SysOperLogColumn::OperName.contains(op));
+        }
+        if let Some(bt) = arg.business_type {
+            select = select.filter(SysOperLogColumn::BusinessType.eq(bt));
+        }
+        if let Some(st) = arg.status {
+            select = select.filter(SysOperLogColumn::Status.eq(st));
+        }
+        let (begin, end) = range_bounds(&arg.params);
+        if let Some(b) = begin {
+            select = select.filter(SysOperLogColumn::OperTime.gte(b));
+        }
+        if let Some(e) = end {
+            select = select.filter(SysOperLogColumn::OperTime.lte(e));
+        }
+        let select = select.order_by_desc(SysOperLogColumn::OperTime);
         let page = paginate(pool!(), select, page_req).await?;
         Ok(page.convert::<SysOperLogVO>())
     }
@@ -43,12 +62,9 @@ impl SysOperlogService {
         Ok(r.rows_affected())
     }
 
-    // 异步写入操作日志
+    // 异步写入操作日志：投递到有界队列，由后台协程批量落库（不占请求线程/连接）
     pub async fn add_async(&self, arg: &SysOperLog) -> Result<u64> {
-        let info = arg.to_owned();
-        tokio::spawn(async move {
-            let _ = insert_model(pool!(), info).await;
-        });
+        crate::util::log_sink::push_operlog(arg.clone());
         Ok(1)
     }
 

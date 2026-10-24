@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use crate::modules::system::domain::bo::dict_data::{DictDataPageDTO};
 use crate::modules::system::domain::{
@@ -12,7 +13,11 @@ use crate::modules::system::service::CONTEXT;
 use sea_orm::entity::*;
 use sea_orm::query::*;
 use crate::modules::system::dao::*;
-//const DICT_KEY: &'static str = "sys_dict_data:all";
+
+/// 按 dict_type 分组的字典数据缓存 key 前缀（与 RuoYi `sys_dict:{type}` 语义对齐）。
+const DICT_DATA_KEY_PREFIX: &'static str = "sys_dict_data:";
+/// 兜底 TTL：即使写操作漏了失效，缓存最多 30 分钟后也会自动重建。
+const DICT_DATA_TTL_SECS: u64 = 1800;
 
 /// dictionary service
 pub struct SysDictDataService {}
@@ -36,16 +41,29 @@ impl SysDictDataService {
         Ok(page.convert::<SysDictDataVO>())
     }
 
+    /// 按字典类型取下拉项（前端每个使用字典的页面都会调，热路径）。
+    ///
+    /// 命中 `sys_dict_data:{type}` 直接返回；未命中则回源一次并写缓存。
     pub async fn get_by_dict_type(&self, dict_type: &String) -> Result<Vec<SysDictDataSimpleVO>> {
+        let key = Self::cache_key(dict_type);
+        if let Ok(Some(cached)) = CONTEXT
+            .cache_service
+            .get_json::<Option<Vec<SysDictDataSimpleVO>>>(&key)
+            .await
+        {
+            return Ok(cached);
+        }
         let data = SysDictDataEntity::find()
             .filter(SysDictDataColumn::DictType.eq(dict_type.clone()))
             .order_by_asc(SysDictDataColumn::DictSort)
             .all(pool!())
             .await?;
-        let mut res = vec![];
-        for d in data {
-            res.push(SysDictDataSimpleVO::from(d))
-        }
+        let res: Vec<SysDictDataSimpleVO> = data.into_iter().map(SysDictDataSimpleVO::from).collect();
+        // 缓存写入失败不影响本次返回
+        let _ = CONTEXT
+            .cache_service
+            .set_json_ex(&key, &res, Some(Duration::from_secs(DICT_DATA_TTL_SECS)))
+            .await;
         Ok(res)
     }
 
@@ -61,7 +79,8 @@ impl SysDictDataService {
 
     pub async fn add(&self, arg: &SysDictData) -> Result<u64> {
         let result = insert_model(pool!(), arg.clone()).await;
-        self.update_cache().await?;
+        // 写操作只做「失效」，不整表重载：真正回源交给下一次 get_by_dict_type 惰性完成
+        self.clear_cache().await?;
         return result;
     }
 
@@ -87,7 +106,7 @@ impl SysDictDataService {
         merged.remark = data.remark.or(merged.remark);
         let result = update_model(pool!(), merged).await;
         if result.is_ok() {
-            self.update_cache().await?;
+            self.clear_cache().await?;
         }
         return Ok(result?);
     }
@@ -104,39 +123,61 @@ impl SysDictDataService {
             .await?
             .rows_affected;
         if r > 0 {
-            self.update_cache().await?;
+            self.clear_cache().await?;
             //copy data to trash
             CONTEXT.sys_trash_service.add("sys_dict_data", &targets).await?;
         }
         Ok(r)
     }
 
-    /// update for all cache
-    pub async fn update_cache(&self) -> Result<()> {
-        let ck = |m: &str| crate::ckpt(&format!("[dict] {}", m));
-        ck("a: before find().all()");
-        let mut all: Vec<SysDictData> = SysDictDataEntity::find().all(pool!()).await?;
-        ck("b: after find().all()");
-        all.sort_by(|a, b| a.dict_sort.cmp(&b.dict_sort));
-        ck("c: after sort_by");
-        let mut dict_data_map: HashMap<&str, Vec<SysDictDataSimpleVO>> = HashMap::new();
-        for dict_data in all {
-            // 脏数据防护：dict_type 为 NULL 时不能 unwrap，否则启动期加载字典缓存
-            // 直接 panic，表现为整个服务起不来（一条坏数据拖垮全站）。
-            // 注意：下方 key 仍被硬编码覆盖（原 fixme），缓存写入也已注释禁用，
-            // 故此处仅保证不崩溃，不改变现有行为。
-            let _key = dict_data.dict_type.clone().as_deref().unwrap_or_default();
-            let key = "1233";//fixme
-            let data_sim = SysDictDataSimpleVO::from(dict_data);
-            if dict_data_map.contains_key(key) {
-                dict_data_map.get_mut(key).unwrap().push(data_sim);
-            } else {
-                dict_data_map.insert(key, vec![data_sim]);
-            }
+    /// 字典类型 -> 缓存 key
+    fn cache_key(dict_type: &str) -> String {
+        format!("{}{}", DICT_DATA_KEY_PREFIX, dict_type)
+    }
+
+    /// 清空全部字典数据缓存（写操作后调用，惰性重建）。
+    pub async fn clear_cache(&self) -> Result<()> {
+        let keys = CONTEXT
+            .cache_service
+            .keys(&format!("{}*", DICT_DATA_KEY_PREFIX))
+            .await?;
+        for k in keys {
+            let _ = CONTEXT.cache_service.del(&k).await;
         }
-        ck("d: after loop");
-        //  CONTEXT.cache_service.set_json(DICT_KEY, &dict_data_map).await?;
-        ck("e: return ok");
-        return Ok(());
+        Ok(())
+    }
+
+    /// 全量预热：一次 SELECT 按 dict_type 分组，写入各自缓存 key。
+    ///
+    /// 启动时调用（或前端点「刷新缓存」时调用）。
+    /// 历史实现把 key 硬编码成 `"1233"` 且写缓存语句被注释，等于每次增删改都白跑
+    /// 一遍全表扫描 + 排序，本次一并修正。
+    pub async fn update_cache(&self) -> Result<()> {
+        let all: Vec<SysDictData> = SysDictDataEntity::find()
+            .order_by_asc(SysDictDataColumn::DictSort)
+            .all(pool!())
+            .await?;
+        let mut grouped: HashMap<String, Vec<SysDictDataSimpleVO>> = HashMap::new();
+        for dict_data in all {
+            // 脏数据防护：dict_type 为 NULL 时跳过（否则会写出一个空前缀 key）
+            let dict_type = match dict_data.dict_type.clone() {
+                Some(dt) if !dt.is_empty() => dt,
+                _ => continue,
+            };
+            grouped
+                .entry(dict_type)
+                .or_default()
+                .push(SysDictDataSimpleVO::from(dict_data));
+        }
+        // 先清掉旧值，避免字典类型被删除后仍残留 key
+        self.clear_cache().await?;
+        let ttl = Some(Duration::from_secs(DICT_DATA_TTL_SECS));
+        for (dict_type, list) in grouped {
+            let _ = CONTEXT
+                .cache_service
+                .set_json_ex(&Self::cache_key(&dict_type), &list, ttl)
+                .await;
+        }
+        Ok(())
     }
 }

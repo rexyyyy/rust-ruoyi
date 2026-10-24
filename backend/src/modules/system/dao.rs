@@ -90,22 +90,52 @@ where
 /// 把 `Select<E>` 包成分页结果：先 `count` 总数，再按 `page_no/page_size` 取值。
 ///
 /// `page_no` 为 1 基（与 rbatis 一致），内部自动转成 0 基 offset。
+///
+/// `count` 与 `fetch_page` 互不依赖，用 `try_join!` 并发下发：大表下 `count(*)`
+/// 往往是分页请求的主要耗时，串行执行会让两者耗时相加。
 pub async fn paginate<E>(db: &DatabaseConnection, select: Select<E>, pr: &PageRequest) -> Result<Page<E::Model>>
 where
     E: EntityTrait,
     E::Model: FromQueryResult + Send + Sync + 'static,
 {
-    let total = select
-        .clone()
-        .count(db)
-        .await
-        .map_err(Error::from)?;
     let per_page = pr.page_size.max(1);
     let page_index = pr.page_no.max(1).saturating_sub(1);
-    let records = select
-        .paginate(db, per_page)
-        .fetch_page(page_index)
-        .await
-        .map_err(Error::from)?;
+    let offset = page_index.saturating_mul(per_page);
+    // 直接拼 LIMIT/OFFSET 而非 Paginator：Paginator 的 fetch_page 借自临时值，
+    // 无法与 count 一起 try_join（E0716）。
+    let counter = select.clone().count(db);
+    let fetcher = select.limit(per_page).offset(offset).all(db);
+    let (total, records) = tokio::try_join!(counter, fetcher).map_err(Error::from)?;
     Ok(Page::new(records, total, pr.page_no, pr.page_size))
+}
+
+/// 解析前端日期范围参数（RuoYi `addDateRange` 约定）：`params[beginTime]` / `params[endTime]`。
+///
+/// 前端传的是 `"2026-10-01"` 或 `"2026-10-01 12:00:00"` 两种格式，
+/// 解析失败宁可忽略该条件，也不要让整个分页请求报错。
+/// `endTime` 只给日期时补齐到 23:59:59，否则当天的记录全被排除。
+pub fn range_bounds(
+    params: &Option<std::collections::HashMap<String, String>>,
+) -> (Option<chrono::NaiveDateTime>, Option<chrono::NaiveDateTime>) {
+    let Some(p) = params else { return (None, None) };
+    let parse = |s: &str, end_of_day: bool| -> Option<chrono::NaiveDateTime> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+            return Some(dt);
+        }
+        let d = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()?;
+        let t = if end_of_day {
+            chrono::NaiveTime::from_hms_opt(23, 59, 59)?
+        } else {
+            chrono::NaiveTime::from_hms_opt(0, 0, 0)?
+        };
+        Some(chrono::NaiveDateTime::new(d, t))
+    };
+    (
+        p.get("beginTime").and_then(|s| parse(s, false)),
+        p.get("endTime").and_then(|s| parse(s, true)),
+    )
 }

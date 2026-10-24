@@ -175,8 +175,9 @@ pub async fn reset_pwd(arg: web::Json<UserUpdateDTO>) -> impl Responder {
 
     //重置密码（默认密码已在service层处理）
     let password = arg.0.password.clone().unwrap_or_default();
-    let vo = CONTEXT.sys_user_service.update_password(
-        &crate::util::password_encoder::PasswordEncoder::encode(&password), &user_id).await;
+    // bcrypt 哈希下沉到阻塞线程池（默认 cost 下单次 200ms+ CPU）
+    let encoded = crate::util::password_encoder::PasswordEncoder::encode_async(&password).await;
+    let vo = CONTEXT.sys_user_service.update_password(&encoded, &user_id).await;
     RespVO::from_result(&vo).resp_json()
 }
 
@@ -326,7 +327,7 @@ pub async fn import_data(current_user: CurrentUser, MultipartForm(mut form): Mul
             phonenumber: Some(phonenumber),
             sex: Some("0".to_string()),
             avatar: None,
-            password: Some(crate::util::password_encoder::PasswordEncoder::encode(&init_password)),
+            password: Some(crate::util::password_encoder::PasswordEncoder::encode_async(&init_password).await),
             status: Some(STATUS_NORMAL.to_string()),
             del_flag: Some(DEL_FLAG_NORMAL.to_string()),
             login_ip: None,

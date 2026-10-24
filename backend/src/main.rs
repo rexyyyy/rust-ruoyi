@@ -60,6 +60,10 @@ async fn async_main() -> std::io::Result<()> {
     }
     backend::modules::job::service::start_scheduler();
 
+    // 审计日志（登录/操作日志）批量写入通道：请求侧只做一次 try_send，
+    // 后台协程按 200 条 / 500ms 聚合后一条 INSERT 落库，避免每条日志一次事务。
+    backend::util::log_sink::init();
+
     // 缓存周期维护（对 moka 后端有效，redis/mem 为空操作）：定期 run_pending_tasks，
     // 保证低流量时段过期条目也能被真正驱逐、计数被刷新；cache_maintain_secs=0 时关闭。
     CONTEXT

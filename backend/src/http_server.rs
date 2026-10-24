@@ -2,6 +2,7 @@
 use actix_cors::Cors;
 use actix_web::{App, HttpResponse, HttpServer, web};
 use actix_web::dev::Server;
+use actix_web::middleware::Compress;
 use actix_web_validator::{Error, JsonConfig};
 use actix_web_validator::error::flatten_errors;
 
@@ -74,6 +75,10 @@ pub fn build_server(app_state: &'static AppState) -> Server {
             // 直接 panic，表现为连接被无响应关闭。白名单见 application-*.yml。
             .wrap(crate::middleware::auth_actix::Auth)
             .wrap(cors)
+            // 响应压缩：actix-web 默认 feature 已含 gzip / brotli / zstd，无需额外依赖。
+            // 放在最外层，使鉴权中间件产生的 401/403 JSON 也能被压缩；
+            // 菜单路由、字典、列表类接口响应常达 100KB+，压缩后传输量可降 70% 以上。
+            .wrap(Compress::default())
             .service(web::scope(&base_api).service(
                 web::scope("/system") //系统应用（镜像 org.dromara.system.controller.system）
                     // ============================================================

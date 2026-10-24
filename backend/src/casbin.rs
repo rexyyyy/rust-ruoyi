@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use once_cell::sync::OnceCell;
 use sea_orm_adapter::SeaOrmAdapter;
@@ -42,6 +43,52 @@ static POLICY_NON_EMPTY: AtomicBool = AtomicBool::new(false);
 /// 否则缓存标志会与实际策略脱节。
 pub fn refresh_policy_flag(e: &Enforcer) {
     POLICY_NON_EMPTY.store(!e.get_policy().is_empty(), Ordering::Relaxed);
+    // 策略变了，历史鉴权结果全部失效
+    clear_decision_cache();
+}
+
+// ---------------------------------------------------------------------------
+// 鉴权结果缓存
+// ---------------------------------------------------------------------------
+//
+// `Enforcer::enforce` 要走一遍 matcher：遍历全部 `p` 策略，逐条执行
+// `keyMatch2`（内部要编译/匹配正则）。策略数量约为「角色数 × 菜单数」，
+// 每请求一趟并不便宜。而同一用户在短时间内重复访问同一 (path, method)
+// 的结果是稳定的，因此做一层短 TTL 的判定缓存。
+//
+// 一致性：角色/菜单变更会重新播种策略（`refresh_policy_flag`）或手动清缓存，
+// 且 TTL 只有 60s，最坏情况下的权限延迟也可接受。
+
+type DecisionKey = (String, String, String);
+
+/// (user, path, method) -> (是否允许, 写入时刻)
+static DECISION_CACHE: once_cell::sync::Lazy<Mutex<HashMap<DecisionKey, (bool, Instant)>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+
+const DECISION_TTL: Duration = Duration::from_secs(60);
+const DECISION_CACHE_MAX: usize = 20_000;
+
+/// 清空鉴权结果缓存（策略变更 / 手动刷新权限后调用）。
+pub fn clear_decision_cache() {
+    let mut g = DECISION_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    g.clear();
+}
+
+fn decision_get(key: &DecisionKey) -> Option<bool> {
+    let g = DECISION_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    match g.get(key) {
+        Some((allowed, at)) if at.elapsed() < DECISION_TTL => Some(*allowed),
+        _ => None,
+    }
+}
+
+fn decision_put(key: DecisionKey, allowed: bool) {
+    let mut g = DECISION_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if g.len() >= DECISION_CACHE_MAX {
+        // 粗粒度容量保护：满了就整体清空（写少读多，极少触发）
+        g.clear();
+    }
+    g.insert(key, (allowed, Instant::now()));
 }
 
 /// 加载模型 + sea-orm 适配器，构建全局 enforcer。
@@ -108,12 +155,19 @@ pub async fn enforce(user: &str, path: &str, method: &str) -> casbin::Result<boo
         return Ok(false);
     }
     let method_uc = method.to_uppercase();
-    e.enforce(vec![
+    // 先查判定缓存：命中直接返回，省掉 enforcer 的锁 + matcher 遍历
+    let key: DecisionKey = (user.to_string(), path.to_string(), method_uc.clone());
+    if let Some(allowed) = decision_get(&key) {
+        return Ok(allowed);
+    }
+    let allowed = e.enforce(vec![
         user.to_string(),
         DOMAIN.to_string(),
         path.to_string(),
         method_uc,
-    ])
+    ])?;
+    decision_put(key, allowed);
+    Ok(allowed)
 }
 
 // ---------------------------------------------------------------------------

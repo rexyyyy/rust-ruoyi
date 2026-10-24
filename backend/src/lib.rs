@@ -27,14 +27,26 @@ pub mod token_auth;
 // 已在 orm 迁移后不存在），保留代码但不编译。
 pub mod middleware;
 
-/// 启动栈溢出排查用：直接写文件的打点（stderr 经管道会因进程 abort 丢失）
+/// 启动栈溢出排查用：直接写文件的打点。
+///
+/// - **仅 debug 构建生效**：release 下为空操作，避免生产环境每次打点都开一次文件
+///   （字典/菜单刷新等请求路径上也会调用）。
+/// - 日志路径由环境变量 `RUOYI_CKPT_FILE` 指定，未设置时不写文件，只走 `log::debug!`。
 pub fn ckpt(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("D:/rust-proj/rust-ruoyi/backend/ckpt.log")
+    #[cfg(debug_assertions)]
     {
-        let _ = writeln!(f, "{}", msg);
+        match std::env::var("RUOYI_CKPT_FILE") {
+            Ok(path) if !path.trim().is_empty() => {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    let _ = writeln!(f, "{}", msg);
+                }
+            }
+            _ => log::debug!("[ckpt] {}", msg),
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = msg;
     }
 }

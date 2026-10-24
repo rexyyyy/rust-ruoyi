@@ -155,7 +155,12 @@ impl ICacheService for MokaService {
         })
     }
 
-    /// GET + 续期：取到值后按新 TTL 重插（触发 Expiry::expire_after_update）。
+    /// GET + 续期：取到值后必要时按新 TTL 重插（触发 `Expiry::expire_after_update`）。
+    ///
+    /// **续期降频**：只有剩余寿命不足新 TTL 的一半时才写回。
+    /// 鉴权中间件每个请求都会调本方法，若无条件 `insert`，等于每请求一次写：
+    /// moka 写路径要走并发 HashMap 的写锁 + 触发 housekeeping，多核下是明确的竞争点；
+    /// 而 token 续期本身只需要「别提前过期」，没必要每请求刷新精确到期时刻。
     fn get_string_refresh_ttl(&self, k: &str, time_sec: i32) -> BoxFuture<'_, Result<String>> {
         let k = k.to_string();
         let secs = Duration::from_secs(time_sec.max(1) as u64);
@@ -164,9 +169,16 @@ impl ICacheService for MokaService {
                 return Ok(String::new());
             };
             let value = entry.value.clone();
-            self.cache
-                .insert(k, CacheValue::new(value.clone(), Some(secs)))
-                .await;
+            let need_refresh = match entry.remaining(Instant::now()) {
+                Some(remaining) => remaining < secs / 2,
+                // 无过期时间的条目补一次绝对到期时刻，与 Redis EXPIRE 语义对齐
+                None => true,
+            };
+            if need_refresh {
+                self.cache
+                    .insert(k, CacheValue::new(value.clone(), Some(secs)))
+                    .await;
+            }
             Ok(value)
         })
     }
@@ -326,11 +338,15 @@ mod tests {
         // -1：存在但无过期时间
         s.set_string("forever", "v").await.unwrap();
         assert_eq!(s.ttl("forever").await.unwrap(), -1);
-        // 正数：剩余秒数
+        // 正数：剩余秒数（向下取整，插入到读取之间已过去若干微秒，故为 29 或 30）
         s.set_string_ex("soon", "v", Some(Duration::from_secs(30)))
             .await
             .unwrap();
-        assert_eq!(s.ttl("soon").await.unwrap(), 30);
+        let ttl = s.ttl("soon").await.unwrap();
+        assert!(
+            (29..=30).contains(&ttl),
+            "ttl should round down to 29 or 30, got {ttl}"
+        );
     }
 
     #[tokio::test]
@@ -340,11 +356,22 @@ mod tests {
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(120)).await;
-        // 续到 2s：此刻距首次过期只剩 ~80ms，续期后应依然存活
+        // 续到 2s：此刻距首次过期只剩 ~80ms（< 新 TTL 的一半），应触发写回续期
         assert_eq!(s.get_string_refresh_ttl("tok", 2).await.unwrap(), "v");
         tokio::time::sleep(Duration::from_millis(250)).await;
         assert_eq!(s.get_string("tok").await.unwrap(), "v");
         assert_eq!(s.ttl("tok").await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_ttl_throttled_when_remaining_is_large() {
+        let s = svc();
+        s.set_string_ex("tok2", "v", Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        // 剩余 3600s > 新 TTL(60s) 的一半 -> 不写回，剩余寿命保持不变
+        assert_eq!(s.get_string_refresh_ttl("tok2", 60).await.unwrap(), "v");
+        assert!(s.ttl("tok2").await.unwrap() > 3000);
     }
 
     #[tokio::test]
@@ -366,7 +393,8 @@ mod tests {
         assert!(!s.del("d1").await.unwrap());
     }
 
-    #[tokio::test]
+    // 纯同步函数：不能挂 #[tokio::test]（否则宏会断言函数体含 await 且为 async fn）
+    #[test]
     fn glob_semantics() {
         assert!(glob_match("sys_config:*", "sys_config:a"));
         assert!(!glob_match("sys_config:*", "sys_menu:a"));

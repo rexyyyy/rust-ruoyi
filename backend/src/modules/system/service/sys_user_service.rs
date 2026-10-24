@@ -165,13 +165,15 @@ impl SysUserService {
         }
         let mut error = None;
 
-        // check pwd
-        if !PasswordEncoder::verify(
+        // check pwd（bcrypt 是 200ms+ 的纯 CPU 操作，下沉到阻塞线程池，避免阻塞 worker）
+        if !PasswordEncoder::verify_async(
             user.password
                 .as_ref()
                 .ok_or_else(|| Error::from("错误的用户数据，密码为空!"))?,
             &arg.password,
-        ) {
+        )
+        .await
+        {
             error = Some(Error::from("密码不正确!"));
         }
         //todo 加密时间过长，需要换一个，初步定为 https://github.com/RustCrypto/hashes

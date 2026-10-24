@@ -96,7 +96,8 @@ pub async fn register(arg: web::Json<SignUpDTO>) -> impl Responder {
         phonenumber: None,
         sex: Some("0".to_string()),
         avatar: None,
-        password: Some(crate::util::password_encoder::PasswordEncoder::encode(&password)),
+        // bcrypt 哈希下沉到阻塞线程池（默认 cost 下单次 200ms+ CPU）
+        password: Some(crate::util::password_encoder::PasswordEncoder::encode_async(&password).await),
         status: Some(STATUS_NORMAL.to_string()),
         del_flag: Some(DEL_FLAG_NORMAL.to_string()),
         login_ip: None,

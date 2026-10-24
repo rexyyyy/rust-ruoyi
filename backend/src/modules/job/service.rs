@@ -27,6 +27,16 @@ static LAST_FIRE: Lazy<Mutex<HashMap<i64, DateTime<Utc>>>> = Lazy::new(|| Mutex:
 /// 并发受限（concurrent='0'）任务当前是否仍在执行中。
 static INFLIGHT: Lazy<Mutex<HashMap<i64, ()>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// 启用中任务（status='0'）的进程内快照。
+///
+/// 原实现每秒都 `SELECT * FROM sys_job WHERE status='0'`：一天 8.6 万次查询，
+/// 每次都走连接池 + 反序列化，而任务定义几乎不变。改为「快照 + 定时刷新」：
+/// 每 [`SNAPSHOT_REFRESH_TICKS`] 个 tick 回源一次，增删改在 10s 内生效
+/// （与 Quartz 从库表拉取任务的延迟量级一致），DB 查询量降到原来的 1/10。
+static JOB_SNAPSHOT: Lazy<Mutex<Vec<SysJob>>> = Lazy::new(|| Mutex::new(Vec::new()));
+/// 快照刷新间隔（tick 数，1 tick = 1s）
+const SNAPSHOT_REFRESH_TICKS: u64 = 10;
+
 /// cron 表达式解析结果缓存（表达式原文 -> Schedule）。
 ///
 /// 调度器每秒 tick 一次，若每个任务都重新 `Schedule::from_str`，就是
@@ -302,7 +312,7 @@ pub async fn execute_job(job: &SysJob) {
         "[job] execute job_id={} invoke_target={} (polling scheduler)",
         job.job_id, key
     );
-    write_job_log(job.job_id, true).await;
+    write_job_log(job, true).await;
     mark_done(job.job_id);
 }
 
@@ -322,22 +332,17 @@ pub async fn execute_by_key(key: &str, payload: Option<serde_json::Value>) -> Re
 }
 
 /// 写入一条 sys_job_log（基于 sys_job 元数据）。
-async fn write_job_log(job_id: i64, success: bool) {
+///
+/// 直接复用调用方手上的任务行，不再按 job_id 回查一次（原实现是 N+1）。
+async fn write_job_log(job: &SysJob, success: bool) {
     let Some(db) = state::db() else { return };
-    let Ok(Some(m)) = SysJobEntity::find()
-        .filter(SysJobColumn::JobId.eq(job_id))
-        .one(db)
-        .await
-    else {
-        return;
-    };
     let status = if success { "0" } else { "1" }.to_string();
     let msg = if success { "执行成功" } else { "执行失败" }.to_string();
     let am = SysJobLogActiveModel {
         job_log_id: NotSet,
-        job_name: Set(m.job_name.clone()),
-        job_group: Set(m.job_group.clone()),
-        invoke_target: Set(m.invoke_target.clone()),
+        job_name: Set(job.job_name.clone()),
+        job_group: Set(job.job_group.clone()),
+        invoke_target: Set(job.invoke_target.clone()),
         job_message: Set(Some(msg)),
         status: Set(Some(status)),
         exception_info: Set(None),
@@ -364,61 +369,93 @@ pub fn start_scheduler() {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut ticks: u64 = 0;
         loop {
             ticker.tick().await;
-            let now = Utc::now();
+            ticks = ticks.wrapping_add(1);
             let conn = match state::db() {
                 Some(c) => c,
                 None => continue,
             };
-            let jobs = match SysJobEntity::find()
-                .filter(SysJobColumn::Status.eq("0"))
-                .all(conn)
-                .await
-            {
-                Ok(j) => j,
-                Err(e) => {
-                    log::warn!("[job-scheduler] query failed: {e}");
-                    continue;
+
+            // 每 SNAPSHOT_REFRESH_TICKS 个 tick（首个 tick 立即执行）回源一次任务快照
+            if ticks % SNAPSHOT_REFRESH_TICKS == 1 {
+                match SysJobEntity::find()
+                    .filter(SysJobColumn::Status.eq("0"))
+                    .all(conn)
+                    .await
+                {
+                    Ok(jobs) => {
+                        let live: std::collections::HashSet<i64> =
+                            jobs.iter().map(|j| j.job_id).collect();
+                        *JOB_SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner()) = jobs;
+                        // 顺手清理已删除 / 已停用任务的历史状态，避免哈希表无限增长
+                        LAST_FIRE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .retain(|id, _| live.contains(id));
+                        INFLIGHT
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .retain(|id, _| live.contains(id));
+                    }
+                    Err(e) => log::warn!("[job-scheduler] snapshot refresh failed: {e}"),
                 }
-            };
-            for job in jobs {
-                let expr = match &job.cron_expression {
-                    Some(e) if !e.is_empty() => e,
-                    _ => continue,
-                };
-                // 走缓存：避免每秒为每个任务重复解析 cron 表达式
-                let schedule = match cached_schedule(expr) {
-                    Some(s) => s,
-                    None => {
-                        log::warn!("[job-scheduler] bad cron for job {}: {}", job.job_id, expr);
+            }
+
+            let now = Utc::now();
+            let mut due: Vec<SysJob> = Vec::new();
+            {
+                let jobs = JOB_SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner());
+                for job in jobs.iter() {
+                    let expr = match &job.cron_expression {
+                        Some(e) if !e.is_empty() => e,
+                        _ => continue,
+                    };
+                    // 走缓存：避免每秒为每个任务重复解析 cron 表达式
+                    let schedule = match cached_schedule(expr) {
+                        Some(s) => s,
+                        None => {
+                            log::warn!("[job-scheduler] bad cron for job {}: {}", job.job_id, expr);
+                            continue;
+                        }
+                    };
+                    let concurrent_off = job.concurrent.as_deref() == Some("0");
+                    if concurrent_off
+                        && INFLIGHT
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains_key(&job.job_id)
+                    {
                         continue;
                     }
-                };
-                let concurrent_off = job.concurrent.as_deref() == Some("0");
-                if concurrent_off && INFLIGHT.lock().unwrap().contains_key(&job.job_id) {
-                    continue;
-                }
-                let should_fire = {
-                    let mut lf = LAST_FIRE.lock().unwrap();
-                    let last = lf.get(&job.job_id).copied().unwrap_or(now);
-                    match schedule.after(&last).next() {
-                        Some(next) if next <= now => {
-                            lf.insert(job.job_id, next);
-                            true
+                    let should_fire = {
+                        let mut lf = LAST_FIRE.lock().unwrap_or_else(|e| e.into_inner());
+                        let last = lf.get(&job.job_id).copied().unwrap_or(now);
+                        match schedule.after(&last).next() {
+                            Some(next) if next <= now => {
+                                lf.insert(job.job_id, next);
+                                true
+                            }
+                            _ => false,
                         }
-                        _ => false,
+                    };
+                    if should_fire {
+                        if concurrent_off {
+                            INFLIGHT
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(job.job_id, ());
+                        }
+                        due.push(job.clone());
                     }
-                };
-                if should_fire {
-                    if concurrent_off {
-                        INFLIGHT.lock().unwrap().insert(job.job_id, ());
-                    }
-                    let job = job.clone();
-                    tokio::spawn(async move {
-                        execute_job(&job).await;
-                    });
                 }
+            }
+            // 锁已释放再 spawn，避免执行体里回头取同一把锁
+            for job in due {
+                tokio::spawn(async move {
+                    execute_job(&job).await;
+                });
             }
         }
     });

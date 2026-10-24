@@ -8,7 +8,6 @@ use crate::error::Result;
 use crate::pool;
 use sea_orm::entity::*;
 use sea_orm::query::*;
-use sea_orm::*;
 use crate::modules::system::dao::*;
 
 /// dictionary service
@@ -17,19 +16,33 @@ pub struct SysLogininforService {}
 impl SysLogininforService {
     pub async fn page(&self, arg: &LogininforPageDTO) -> Result<Page<SysLogininforVO>> {
         let page_req = &PageRequest::from(arg);
-        let select = SysLogininforEntity::find()
-            .order_by_desc(SysLogininforColumn::LoginTime);
+        // 原实现完全忽略 DTO 过滤条件（前端搜索框无效），此处补齐地址/用户名/状态/时间范围
+        let mut select = SysLogininforEntity::find();
+        if let Some(ip) = arg.ipaddr.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            select = select.filter(SysLogininforColumn::Ipaddr.contains(ip));
+        }
+        if let Some(un) = arg.user_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            select = select.filter(SysLogininforColumn::UserName.contains(un));
+        }
+        if let Some(st) = arg.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            select = select.filter(SysLogininforColumn::Status.eq(st));
+        }
+        let (begin, end) = range_bounds(&arg.params);
+        if let Some(b) = begin {
+            select = select.filter(SysLogininforColumn::LoginTime.gte(b));
+        }
+        if let Some(e) = end {
+            select = select.filter(SysLogininforColumn::LoginTime.lte(e));
+        }
+        let select = select.order_by_desc(SysLogininforColumn::LoginTime);
         let page = paginate(pool!(), select, page_req).await?;
         Ok(page.convert::<SysLogininforVO>())
     }
 
-    //异步加入日志
+    // 异步写入登录日志：投递到有界队列，由后台协程批量落库（不占请求线程/连接）
     pub async fn add_async(&self, arg: &SysLogininfor) -> Result<u64> {
-        let info = arg.to_owned();
-        tokio::spawn(async move {
-            let _ = insert_model(pool!(), info).await;
-        });
-        return Ok(1);
+        crate::util::log_sink::push_logininfor(arg.clone());
+        Ok(1)
     }
 
 

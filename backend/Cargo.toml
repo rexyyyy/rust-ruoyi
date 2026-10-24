@@ -85,7 +85,15 @@ calamine = "0.36.1"
 # 定时任务调度器用 cron 表达式解析（自研轮询调度，不依赖 apalis）
 cron = "0.16"
 
+# 面向服务端吞吐优化：
+# - opt-level = 3：原配置为 'z'（优先二进制体积），会关闭向量化与部分内联，
+#   JSON (de)serialize / bcrypt / SQL 参数绑定等热点明显变慢；服务端更看重吞吐而非体积。
+# - lto = "thin"：完整 fat LTO 在 40+ 依赖的图上编译能耗时数分钟，thin LTO 已能拿到
+#   绝大部分跨 crate 内联收益，且保留并行 codegen。
+# - codegen-units = 1：配合 LTO 拿到最优代码；如需更快出包可调到 4（代价约 5% 运行时）。
 [profile.release]
-lto = true
-opt-level = 'z'
+lto = "thin"
+opt-level = 3
 codegen-units = 1
+# 保留 unwind：actix worker panic 后由 supervisor 重启线程，abort 会让整个进程退出
+panic = "unwind"
