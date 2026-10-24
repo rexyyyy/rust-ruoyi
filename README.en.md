@@ -8,6 +8,11 @@
 
 ## 1. Introduction
 
+**Repository:**
+
+- GitHub: <https://github.com/rexyyyy/rust-ruoyi>
+- Gitee: <https://gitee.com/witgg2001/rust-ruoyi>
+
 rust-ruoyi is a **rewrite of the RuoYi (若依) system in Rust**, paired with the official frontend from the RuoYi ecosystem.
 
 It stays highly compatible with the original framework, supports code generation, starts instantly, and delivers high performance with a small resource footprint.

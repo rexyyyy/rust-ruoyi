@@ -8,6 +8,11 @@
 
 ## 1. 项目简介
 
+**仓库地址：**
+
+- GitHub：<https://github.com/rexyyyy/rust-ruoyi>
+- Gitee：<https://gitee.com/witgg2001/rust-ruoyi>
+
 rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭配若依生态官方前端的项目。
 对原框架兼容性高,支持代码生成，启动快捷，性能高资源少
 **与 RuoYi 的关系：**
