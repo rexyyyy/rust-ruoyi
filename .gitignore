@@ -38,3 +38,4 @@ e2e_*.png
 .history/
 .DS_Store
 Thumbs.db
+/backend/Cargo.lock

@@ -27,8 +27,8 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 | 后端语言 | Rust（actix-web 4 + tokio 异步运行时） |
 | ORM | SeaORM 1.1（多数据库） |
 | 权限 | casbin（RBAC）+ jsonwebtoken（JWT） |
-| 缓存 | Redis |
-| 定时任务 | apalis（cron 表达式 + Postgres 存储） |
+| 缓存 | 默认 Moka（进程内 TinyLFU + TTL），可切换 Redis |
+| 定时任务 | 自研轮询调度器（cron 表达式，方言无关、不绑定特定数据库） |
 | 前端 | plus-ui 5.x（Vue 3 + TypeScript + Element Plus + Vite + Pinia + UnoCSS + vxe-table） |
 | 数据库 | 默认 PostgreSQL（可切换 MySQL） |
 | 代码生成 | codegen 子项目（读表结构生成前后端代码） |
@@ -57,9 +57,9 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 **认证与权限**：账号密码登录 + 验证码、JWT 无状态认证、casbin 接口级 RBAC 鉴权
 **系统监控**：服务监控（CPU/内存/磁盘）、在线用户、缓存监控、操作日志、登录日志
 **通用能力**：文件上传、Excel 导入导出（rust_xlsxwriter / calamine）、WebSocket 通讯示例、SSE 服务端推送
-**定时任务**：基于 apalis 1.0（替代 RuoYi ruoyi-job），支持 cron 表达式、任务重试/超时/并发限制，任务数据存 PostgreSQL
+**定时任务**：自研「方言无关轮询调度器」（替代 RuoYi ruoyi-job 与原 apalis 引擎），支持 cron 表达式与并发限制，任务数据存在业务库（PostgreSQL / MySQL 均可）
 **多数据库**：基于 SeaORM，同一套代码支持 PostgreSQL / MySQL（当前默认 PostgreSQL，通过 Cargo features 切换，切换后建议回归测试）
-**缓存**：Redis（登录态、业务缓存）
+**缓存**：默认 Moka 进程内缓存（登录态、字典/菜单/参数等业务缓存）；`cache_type` 可切换为 Redis，用于多实例共享会话
 **代码生成**：codegen 子项目读取数据库表结构，按模板生成后端（controller/service/domain）+ 前端页面 + SQL 菜单脚本
 **扩展示例**：微信公众号消息接入（wx 模块）、demo 业务模块（course 课程管理，演示从建表到生成代码的全流程）
 
@@ -80,9 +80,9 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 
 - actix-web：https://github.com/actix/actix-web
 - SeaORM：https://github.com/SeaQL/sea-orm
-- apalis（定时任务）：https://github.com/apalis-dev/apalis
+- moka（进程内缓存，默认）：https://github.com/moka-rs/moka
 - casbin-rs：https://github.com/casbin/casbin-rs
-- Redis crate：https://github.com/redis-rs/redis-rs
+- Redis crate（可选缓存后端）：https://github.com/redis-rs/redis-rs
 
 ## 6. 快速开始
 
@@ -94,7 +94,7 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 |---|---|
 | Rust 工具链 | 含 `cargo` |
 | PostgreSQL | 13~16，建议设置 `lc_messages = 'en_US.UTF-8'` |
-| Redis | 默认 `redis://localhost:6379` |
+| Redis | **可选**。默认走 Moka 进程内缓存，单机启动无需 Redis；多实例共享会话时才用到（届时把 `cache_type` 改为 `redis`） |
 | 库表初始化 | 导入 `script/postgresql-5.x-public.sql`（默认库名 `ruoyirust`） |
 | 前端 | Node >= 20 + pnpm（目录 `plus-ui-5.X`） |
 
@@ -114,7 +114,26 @@ cargo run --bin ruoyi_rust_prod -- profile=prod
 powershell -File build_backend.ps1
 ```
 
-默认连接串见 `application-dev.yml`：`postgres://postgres:123456@localhost:5434/ruoyirust`，Redis 见 `web_redis_url`。按需修改为本机环境。
+默认连接串见 `application-dev.yml`：`postgres://postgres:123456@localhost:5434/ruoyirust`。按需修改为本机环境。
+
+**缓存后端选择**（`application.yml` 的 `cache_type`）
+
+| `cache_type` | 说明 | 适用场景 |
+|---|---|---|
+| `moka`（默认） | 进程内缓存：TinyLFU 淘汰 + per-entry TTL + 加权容量预算，**零外部依赖** | 单机部署 / 本地开发（推荐） |
+| `redis` | 多实例共享会话与缓存，需配 `web_redis_url` | **多实例部署必须用它**，否则登录态无法跨实例共享 |
+| `mem` | 旧 HashMap 实现：无容量上限、每次读写全表扫描 | 仅作对照，不建议生产 |
+
+配套配置项（仅 `cache_type: moka` 生效）：
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `cache_max_capacity_mb` | `64` | 容量预算（按 key+value 字节计），超限按 TinyLFU 淘汰冷数据 |
+| `cache_ttl_secs` | `0` | 兜底 TTL（秒）。`0`=不设全局上限，每条只按写入时的过期时间；`>0` 作为最长存活上限 |
+| `cache_time_to_idle_secs` | `0` | 空闲淘汰时长（秒），`0`=关闭（只按 TTL 淘汰） |
+| `cache_maintain_secs` | `60` | 周期维护间隔（秒）：定期驱逐过期条目并刷新计数，`0`=关闭 |
+
+> `cache_type` 留空或写成未知值时，会回落到 `moka` 并打印 warn，**不再 panic**——避免配置笔误导致服务起不来。
 
 **前端（plus-ui-5.X）**
 
