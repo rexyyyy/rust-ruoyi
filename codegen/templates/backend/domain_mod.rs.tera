@@ -1,0 +1,10 @@
+//! {{ class_name }} 领域层
+//! 由 codegen 于 {{ generated_at }} 生成。
+
+pub mod bo;
+pub mod entity;
+pub mod vo;
+
+pub use bo::*;
+pub use entity::*;
+pub use vo::*;

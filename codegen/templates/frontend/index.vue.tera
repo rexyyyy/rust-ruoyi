@@ -1,0 +1,235 @@
+<template>
+  <div class="p-2">
+    <transition :enter-active-class="proxy?.animate.searchAnimate.enter" :leave-active-class="proxy?.animate.searchAnimate.leave">
+      <div v-show="showSearch" class="mb-[10px]">
+        <el-card shadow="hover">
+          <el-form ref="queryFormRef" :model="queryParams" :inline="true">
+{% for c in columns %}{% if c.is_query %}            <el-form-item label="{{ c.comment }}" prop="{{ c.prop }}">
+{% if c.html_type == "datetime" %}              <el-date-picker
+                v-model="queryParams.{{ c.prop }}"
+                type="datetimerange"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+              />
+{% elif c.dict_type != "" %}              <el-select v-model="queryParams.{{ c.prop }}" placeholder="请选择{{ c.comment }}" clearable>
+                <el-option v-for="dict in {{ c.dict_type }}" :key="dict.value" :label="dict.label" :value="dict.value" />
+              </el-select>
+{% else %}              <el-input v-model="queryParams.{{ c.prop }}" placeholder="请输入{{ c.comment }}" clearable @keyup.enter="handleQuery" />
+{% endif %}            </el-form-item>
+{% endif %}{% endfor %}            <el-form-item>
+              <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
+              <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </div>
+    </transition>
+
+    <el-card shadow="hover">
+      <template #header>
+        <el-row :gutter="10" class="mb8">
+          <el-col :span="1.5">
+            <el-button v-hasPermi="['{{ perm }}:add']" type="primary" plain icon="Plus" @click="handleAdd">新增</el-button>
+          </el-col>
+          <el-col :span="1.5">
+            <el-button v-hasPermi="['{{ perm }}:edit']" type="success" plain icon="Edit" :disabled="single" @click="handleUpdate()">修改</el-button>
+          </el-col>
+          <el-col :span="1.5">
+            <el-button v-hasPermi="['{{ perm }}:remove']" type="danger" plain icon="Delete" :disabled="multiple" @click="handleDelete()">删除</el-button>
+          </el-col>
+          <el-col :span="1.5">
+            <el-button v-hasPermi="['{{ perm }}:export']" type="warning" plain icon="Download" @click="handleExport">导出</el-button>
+          </el-col>
+          <right-toolbar v-model:show-search="showSearch" @query-table="getList"></right-toolbar>
+        </el-row>
+      </template>
+
+      <el-table v-loading="loading" border :data="{{ list_var }}" @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="55" align="center" />
+{% for c in columns %}{% if c.is_list %}{% if c.dict_type != "" %}        <el-table-column label="{{ c.comment }}" align="center" prop="{{ c.prop }}">
+          <template #default="scope">
+            <dict-tag :options="{{ c.dict_type }}" :value="scope.row.{{ c.prop }}" />
+          </template>
+        </el-table-column>
+{% elif c.is_datetime %}        <el-table-column label="{{ c.comment }}" align="center" prop="{{ c.prop }}" width="180">
+          <template #default="scope">
+            <span v-text="proxy?.parseTime(scope.row.{{ c.prop }})"></span>
+          </template>
+        </el-table-column>
+{% else %}        <el-table-column label="{{ c.comment }}" align="center" prop="{{ c.prop }}" show-overflow-tooltip />
+{% endif %}{% endif %}{% endfor %}        <el-table-column label="操作" width="180" align="center" class-name="small-padding fixed-width">
+          <template #default="scope">
+            <el-tooltip content="修改" placement="top">
+              <el-button v-hasPermi="['{{ perm }}:edit']" link type="primary" icon="Edit" @click="handleUpdate(scope.row)"></el-button>
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button v-hasPermi="['{{ perm }}:remove']" link type="primary" icon="Delete" @click="handleDelete(scope.row)"></el-button>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <pagination v-show="total > 0" v-model:page="queryParams.pageNum" v-model:limit="queryParams.pageSize" :total="total" @pagination="getList" />
+    </el-card>
+
+    <!-- 添加或修改{{ function_name }}对话框 -->
+    <el-dialog v-model="dialog.visible" :title="dialog.title" width="600px" append-to-body>
+      <el-form ref="{{ form_ref }}" :model="form" :rules="rules" label-width="100px">
+{% for c in columns %}{% if c.is_insert or c.is_edit %}        <el-form-item label="{{ c.comment }}" prop="{{ c.prop }}">
+{% if c.html_type == "datetime" %}          <el-date-picker clearable v-model="form.{{ c.prop }}" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="请选择{{ c.comment }}"></el-date-picker>
+{% elif c.html_type == "radio" and c.dict_type != "" %}          <el-radio-group v-model="form.{{ c.prop }}">
+            <el-radio v-for="dict in {{ c.dict_type }}" :key="dict.value" :value="dict.value">{% raw %}{{ dict.label }}{% endraw %}</el-radio>
+          </el-radio-group>
+{% elif c.dict_type != "" %}          <el-select v-model="form.{{ c.prop }}" placeholder="请选择{{ c.comment }}">
+            <el-option v-for="dict in {{ c.dict_type }}" :key="dict.value" :label="dict.label" :value="dict.value" />
+          </el-select>
+{% elif c.html_type == "textarea" %}          <el-input v-model="form.{{ c.prop }}" type="textarea" placeholder="请输入{{ c.comment }}" />
+{% elif c.is_numeric %}          <el-input-number v-model="form.{{ c.prop }}" controls-position="right" :min="0" />
+{% else %}          <el-input v-model="form.{{ c.prop }}" placeholder="请输入{{ c.comment }}" />
+{% endif %}        </el-form-item>
+{% endif %}{% endfor %}      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button type="primary" @click="submitForm">确 定</el-button>
+          <el-button @click="cancel">取 消</el-button>
+        </div>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup name="{{ class_name }}" lang="ts">
+import { list{{ class_name }}, add{{ class_name }}, del{{ class_name }}, get{{ class_name }}, update{{ class_name }} } from '@/api/{{ module_name }}/{{ business_name }}';
+import { {{ class_name }}Form, {{ class_name }}Query, {{ class_name }}VO } from '@/api/{{ module_name }}/{{ business_name }}/types';
+
+const { proxy } = getCurrentInstance() as ComponentInternalInstance;
+{% if has_dict %}const { {{ dict_vars }} } = toRefs<any>(proxy?.useDict({{ dict_literals }}));
+{% endif %}
+const {{ list_var }} = ref<{{ class_name }}VO[]>([]);
+const loading = ref(true);
+const showSearch = ref(true);
+const ids = ref<Array<number | string>>([]);
+const single = ref(true);
+const multiple = ref(true);
+const total = ref(0);
+const {{ form_ref }} = ref<ElFormInstance>();
+const queryFormRef = ref<ElFormInstance>();
+
+const dialog = reactive<DialogOption>({
+  visible: false,
+  title: ''
+});
+
+const initFormData: {{ class_name }}Form = {
+{% for c in columns %}{% if c.is_pk %}  {{ c.prop }}: undefined,
+{% elif c.is_insert or c.is_edit %}  {{ c.prop }}: {% if c.ts_type == "number" %}0{% elif c.ts_type == "boolean" %}false{% elif c.ts_type == "string" %}''{% else %}undefined{% endif %},
+{% endif %}{% endfor %}};
+
+const data = reactive<PageData<{{ class_name }}Form, {{ class_name }}Query>>({
+  form: { ...initFormData },
+  queryParams: {
+    pageNum: 1,
+    pageSize: 10,
+{% for c in columns %}{% if c.is_query %}    {{ c.prop }}: {% if c.ts_type == "number" %}undefined{% elif c.ts_type == "string" %}''{% else %}undefined{% endif %},
+{% endif %}{% endfor %}},
+  rules: {
+{% for c in columns %}{% if (c.is_insert or c.is_edit) and c.is_required %}    {{ c.prop }}: [{ required: true, message: '{{ c.comment }}不能为空', trigger: 'blur' }],
+{% endif %}{% endfor %}  }
+});
+
+const { queryParams, form, rules } = toRefs<PageData<{{ class_name }}Form, {{ class_name }}Query>>(data);
+
+/** 查询{{ function_name }}列表 */
+const getList = async () => {
+  loading.value = true;
+  const res = await list{{ class_name }}(queryParams.value);
+  {{ list_var }}.value = res.rows;
+  total.value = res.total;
+  loading.value = false;
+};
+
+/** 取消按钮 */
+const cancel = () => {
+  reset();
+  dialog.visible = false;
+};
+
+/** 表单重置 */
+const reset = () => {
+  form.value = { ...initFormData };
+  {{ form_ref }}.value?.resetFields();
+};
+
+/** 搜索按钮操作 */
+const handleQuery = () => {
+  queryParams.value.pageNum = 1;
+  getList();
+};
+
+/** 重置按钮操作 */
+const resetQuery = () => {
+  queryFormRef.value?.resetFields();
+  handleQuery();
+};
+
+/** 多选框选中数据 */
+const handleSelectionChange = (selection: {{ class_name }}VO[]) => {
+  ids.value = selection.map((item) => item.{{ pk.prop }});
+  single.value = selection.length != 1;
+  multiple.value = !selection.length;
+};
+
+/** 新增按钮操作 */
+const handleAdd = () => {
+  reset();
+  dialog.visible = true;
+  dialog.title = '添加{{ function_name }}';
+};
+
+/** 修改按钮操作 */
+const handleUpdate = async (row?: {{ class_name }}VO) => {
+  reset();
+  const _{{ pk.prop }} = row?.{{ pk.prop }} || ids.value[0];
+  const res = await get{{ class_name }}(_{{ pk.prop }});
+  Object.assign(form.value, res.data);
+  dialog.visible = true;
+  dialog.title = '修改{{ function_name }}';
+};
+
+/** 提交按钮 */
+const submitForm = () => {
+  {{ form_ref }}.value?.validate(async (valid: boolean) => {
+    if (valid) {
+      form.value.{{ pk.prop }} ? await update{{ class_name }}(form.value) : await add{{ class_name }}(form.value);
+      proxy?.$modal.msgSuccess('操作成功');
+      dialog.visible = false;
+      await getList();
+    }
+  });
+};
+
+/** 删除按钮操作 */
+const handleDelete = async (row?: {{ class_name }}VO) => {
+  const _{{ pk.prop }}s = row?.{{ pk.prop }} || ids.value;
+  await proxy?.$modal.confirm('是否确认删除{{ function_name }}编号为"' + _{{ pk.prop }}s + '"的数据项？');
+  await del{{ class_name }}(_{{ pk.prop }}s);
+  await getList();
+  proxy?.$modal.msgSuccess('删除成功');
+};
+
+/** 导出按钮操作 */
+const handleExport = () => {
+  proxy?.download(
+    '{{ module_name }}/{{ business_name }}/export',
+    {
+      ...queryParams.value
+    },
+    `{{ business_name }}_${new Date().getTime()}.xlsx`
+  );
+};
+
+onMounted(() => {
+  getList();
+});
+</script>

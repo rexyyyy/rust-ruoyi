@@ -1,0 +1,25 @@
+[package]
+name = "sea-orm-adapter"
+version = "0.1.0"
+edition = "2021"
+description = "Sea ORM adapter for casbin-rs (vendored from soybean-admin-rust)"
+
+[dependencies]
+async-trait = { version = "0.1", default-features = false }
+casbin = { version = "2.10", default-features = false }
+sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-native-tls"] }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["full"] }
+
+[features]
+default = ["postgres", "runtime-tokio-native-tls"]
+
+#databases
+mysql = ["sea-orm/sqlx-mysql"]
+postgres = ["sea-orm/sqlx-postgres"]
+sqlite = ["sea-orm/sqlx-sqlite"]
+
+# async runtime
+runtime-tokio-native-tls = ["casbin/runtime-tokio", "sea-orm/runtime-tokio-native-tls"]
+runtime-tokio-rustls = ["casbin/runtime-tokio", "sea-orm/runtime-tokio-rustls"]

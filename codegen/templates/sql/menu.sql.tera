@@ -1,0 +1,78 @@
+-- ================================================================
+-- {{ module_name }}/{{ business_name }} 菜单初始化 SQL
+-- 源表：{{ table_name }}　由 codegen 于 {{ generated_at }} 生成
+--
+-- 设计说明：
+-- 1) 不写死 menu_id，全部用 max(menu_id)+1 推算，避免与既有数据撞主键；
+-- 2) 每条 INSERT 带 NOT EXISTS 判重，脚本可重复执行；
+-- 3) 菜单的 component 与前端模板输出目录保持一致：views/{{ module_name }}/{{ business_name }}/index.vue
+-- ================================================================
+{% if parent_menu_id == 0 %}
+-- 1) 一级目录：{{ module_name }}
+INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param,
+                      is_frame, is_cache, menu_type, visible, status, perms, icon,
+                      create_by, create_time, update_by, update_time, remark)
+SELECT COALESCE((SELECT MAX(menu_id) FROM sys_menu), 0) + 1,
+       '{{ module_name }}',
+       0,
+       (SELECT COALESCE(MAX(order_num), 0) + 1 FROM sys_menu WHERE parent_id = 0),
+       '{{ module_name }}',
+       NULL, '',
+       '1', '0', 'M', '0', '0', '', 'international',
+       1, now(), 1, now(), '{{ module_name }}模块'
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE menu_name = '{{ module_name }}' AND parent_id = 0);
+{% else %}
+-- 1) 跳过一级目录创建：已指定挂到现有菜单 {{ parent_menu_id }} 下
+{% endif %}
+
+-- 2) 二级菜单：{{ function_name }}
+INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param,
+                      is_frame, is_cache, menu_type, visible, status, perms, icon,
+                      create_by, create_time, update_by, update_time, remark)
+SELECT COALESCE((SELECT MAX(menu_id) FROM sys_menu), 0) + 1,
+       '{{ function_name }}',
+       {% if parent_menu_id == 0 %}(SELECT menu_id FROM sys_menu WHERE menu_name = '{{ module_name }}' AND parent_id = 0){% else %}{{ parent_menu_id }}{% endif %},
+       (SELECT COALESCE(MAX(order_num), 0) + 1 FROM sys_menu),
+       '{{ business_name }}',
+       '{{ module_name }}/{{ business_name }}/index',
+       '',
+       '1', '0', 'C', '0', '0', '{{ perm }}:list', 'clipboard',
+       1, now(), 1, now(), '{{ function_name }}菜单'
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE perms = '{{ perm }}:list');
+
+-- 3) 按钮权限
+INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param,
+                      is_frame, is_cache, menu_type, visible, status, perms, icon,
+                      create_by, create_time, update_by, update_time, remark)
+SELECT COALESCE((SELECT MAX(menu_id) FROM sys_menu), 0) + 1 + ord.rn,
+       CASE ord.rn
+           WHEN 0 THEN '{{ function_name }}查询'
+           WHEN 1 THEN '{{ function_name }}新增'
+           WHEN 2 THEN '{{ function_name }}修改'
+           WHEN 3 THEN '{{ function_name }}删除'
+           ELSE '{{ function_name }}导出'
+       END,
+       (SELECT menu_id FROM sys_menu WHERE perms = '{{ perm }}:list'),
+       ord.rn + 1,
+       '', '', '',
+       '1', '0', 'F', '0', '0',
+       CASE ord.rn
+           WHEN 0 THEN '{{ perm }}:query'
+           WHEN 1 THEN '{{ perm }}:add'
+           WHEN 2 THEN '{{ perm }}:edit'
+           WHEN 3 THEN '{{ perm }}:remove'
+           ELSE '{{ perm }}:export'
+       END,
+       '#',
+       1, now(), 1, now(), ''
+FROM (SELECT 0 AS rn UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) ord
+WHERE NOT EXISTS (
+    SELECT 1 FROM sys_menu sm
+    WHERE sm.perms = CASE ord.rn
+                         WHEN 0 THEN '{{ perm }}:query'
+                         WHEN 1 THEN '{{ perm }}:add'
+                         WHEN 2 THEN '{{ perm }}:edit'
+                         WHEN 3 THEN '{{ perm }}:remove'
+                         ELSE '{{ perm }}:export'
+                     END
+);

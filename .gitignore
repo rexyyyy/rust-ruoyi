@@ -1,0 +1,40 @@
+# ================= SVN 元数据（本仓库同时是 SVN 工作副本） =================
+.svn/
+
+# ================= 参考仓库 / 归档包（第三方资料，不入库） =================
+ref/
+rust-ruoyi/
+*.zip
+
+# ================= 构建产物与依赖 =================
+target/
+node_modules/
+dist/
+plus-ui-5.X/_tt/
+auto-imports.d.ts
+components.d.ts
+
+# ================= 运行时生成 =================
+*.log
+be_mysql*.log
+backend/uploads/
+# JWT 签名密钥属机密，不入库（首次启动由后端自动生成）
+backend/jwt_secret.key
+
+# ================= 临时文件 =================
+backend/commit_msg.txt
+backend/dryrun.txt
+backend/test_out.txt
+backend/update_by
+tmp_*.sql
+tmp_*.txt
+vs.log
+
+# ================= 测试产物截图 =================
+e2e_*.png
+
+# ================= IDE / 系统 =================
+.idea/
+.history/
+.DS_Store
+Thumbs.db

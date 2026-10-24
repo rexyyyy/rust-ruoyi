@@ -1,0 +1,29 @@
+//! {{ class_name }} 返回对象（VO）
+//! 源表：{{ table_name }}　业务：{{ function_name }}
+//! 由 codegen 于 {{ generated_at }} 生成。
+//!
+//! VO 与前端 TS 类型（`types.ts`）一一对应：`rename_all = "camelCase"`
+//! 保证 JSON 字段名就是 Vue 侧的属性名。
+
+use serde::{Deserialize, Serialize};
+
+use crate::modules::{{ rust_module }}::domain::entity::{{ class_name }};
+
+#[allow(non_snake_case)] // VO 字段即前端 camelCase 属性名，有意为之
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct {{ class_name }}VO {
+    // 主键统一输出成字符串：PG bigint 的精度超过 JS Number 安全范围，
+    // 前端直接塞进 URL / 表单若经过 JSON 数字会有精度丢失风险。
+    pub {{ pk.prop }}: Option<String>,
+{% for c in columns %}{% if not c.is_pk %}    pub {{ c.prop }}: Option<{{ c.rust_type }}>, // {{ c.comment }}
+{% endif %}{% endfor %}}
+
+impl From<{{ class_name }}> for {{ class_name }}VO {
+    fn from(arg: {{ class_name }}) -> Self {
+        Self {
+            {{ pk.prop }}: Some(arg.{{ pk.column_name }}.to_string()),
+{% for c in columns %}{% if not c.is_pk %}            {{ c.prop }}: arg.{{ c.field }},
+{% endif %}{% endfor %}        }
+    }
+}

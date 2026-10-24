@@ -1,0 +1,106 @@
+//! {{ class_name }} 服务层
+//! 源表：{{ table_name }}　业务：{{ function_name }}
+//! 由 codegen 于 {{ generated_at }} 生成。
+//!
+//! 数据访问统一走 `system::dao` 的助手函数（`paginate` / `insert_model` / `update_model`），
+//! 与 backend 既有模块保持同一套写法。
+
+use sea_orm::entity::*;
+use sea_orm::query::*;
+use sea_orm::*;
+
+use crate::error::Error;
+use crate::error::Result;
+use crate::modules::system::dao::{insert_model, paginate, update_model};
+use crate::modules::system::domain::{Page, PageRequest};
+use crate::modules::system::service::CONTEXT;
+use crate::pool;
+
+use crate::modules::{{ rust_module }}::domain::bo::{
+    {{ class_name }}AddDTO, {{ class_name }}PageDTO, {{ class_name }}UpdateDTO,
+};
+use crate::modules::{{ rust_module }}::domain::entity::{
+    {{ class_name }}, {{ class_name }}Column, {{ class_name }}Entity,
+};
+use crate::modules::{{ rust_module }}::domain::vo::{{ class_name }}VO;
+
+pub struct {{ class_name }}Service {}
+
+impl {{ class_name }}Service {
+    /// 分页列表
+    pub async fn page(&self, arg: &{{ class_name }}PageDTO) -> Result<Page<{{ class_name }}VO>> {
+        let page_req = &PageRequest::from(arg);
+        let mut select = {{ class_name }}Entity::find();
+{% for c in columns %}{% if c.is_query %}{% if c.is_string %}
+        if let Some(v) = &arg.{{ c.field }} {
+            if !v.is_empty() {
+{% if c.query_type == "LIKE" %}                select = select.filter({{ class_name }}Column::{{ c.cap_field }}.contains(v.as_str()));
+{% else %}                select = select.filter({{ class_name }}Column::{{ c.cap_field }}.eq(v.clone()));
+{% endif %}            }
+        }
+{% else %}
+        if let Some(v) = &arg.{{ c.field }} {
+            select = select.filter({{ class_name }}Column::{{ c.cap_field }}.eq(*v));
+        }
+{% endif %}{% endif %}{% endfor %}
+        select = select.order_by_desc({{ class_name }}Column::{{ pk.cap_field }});
+        let page = paginate(pool!(), select, page_req).await?;
+        Ok(page.convert::<{{ class_name }}VO>())
+    }
+
+    /// 全部（不分页）
+    pub async fn finds_all(&self) -> Result<Vec<{{ class_name }}VO>> {
+        let data = {{ class_name }}Entity::find()
+            .order_by_desc({{ class_name }}Column::{{ pk.cap_field }})
+            .all(pool!())
+            .await?;
+        Ok(data.into_iter().map({{ class_name }}VO::from).collect())
+    }
+
+    /// 按主键取单条
+    pub async fn detail(&self, id: &str) -> Result<{{ class_name }}VO> {
+        let row = {{ class_name }}Entity::find()
+            .filter({{ class_name }}Column::{{ pk.cap_field }}.eq({{ pk_parse_expr }}))
+            .one(pool!())
+            .await?
+            .ok_or_else(|| Error::from(format!("不存在:{}", id)))?;
+        Ok({{ class_name }}VO::from(row))
+    }
+
+    /// 新增
+    pub async fn add(&self, arg: &{{ class_name }}) -> Result<u64> {
+        Ok(insert_model(pool!(), arg.clone()).await?)
+    }
+
+    /// 修改。DTO 未提供到的字段保持原值（`Option::take().or()` 语义），
+    /// 避免前端只提交部分表单时把其余列清空。
+    pub async fn update(&self, data: {{ class_name }}) -> Result<u64> {
+        let old = {{ class_name }}Entity::find()
+            .filter({{ class_name }}Column::{{ pk.cap_field }}.eq(data.{{ pk.column_name }}.clone()))
+            .one(pool!())
+            .await?
+            .ok_or_else(|| Error::from("参数错误"))?;
+        let mut merged = old;
+{% for c in columns %}{% if not c.is_pk %}        merged.{{ c.field }} = data.{{ c.field }}.or(merged.{{ c.field }}.take());
+{% endif %}{% endfor %}
+        Ok(update_model(pool!(), merged).await?)
+    }
+
+    /// 删除（写回收站）
+    pub async fn remove(&self, id: &str) -> Result<u64> {
+        let targets = {{ class_name }}Entity::find()
+            .filter({{ class_name }}Column::{{ pk.cap_field }}.eq({{ pk_parse_expr }}))
+            .all(pool!())
+            .await?;
+        let rows_affected = {{ class_name }}Entity::delete_many()
+            .filter({{ class_name }}Column::{{ pk.cap_field }}.eq({{ pk_parse_expr }}))
+            .exec(pool!())
+            .await?
+            .rows_affected;
+        if rows_affected > 0 {
+            // copy data to trash
+            CONTEXT.sys_trash_service.add("{{ table_name }}", &targets).await?;
+        }
+        Ok(rows_affected)
+    }
+}

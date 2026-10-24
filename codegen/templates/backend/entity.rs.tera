@@ -1,0 +1,29 @@
+//! {{ class_name }} sea-orm 实体
+//! 源表：{{ table_name }}{% if table_comment %}（{{ table_comment }}）{% endif %}
+//!
+//! 由 codegen 于 {{ generated_at }} 生成，重新生成时本文件会被覆盖。
+//!
+//! 说明：非原生类型统一写成全限定路径（`chrono::NaiveDateTime` 等），
+//! 因此除 prelude 外不需要任何额外 `use`，也就不存在多余的未使用导入。
+
+use sea_orm::entity::prelude::*;
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
+#[sea_orm(table_name = "{{ table_name }}")]
+pub struct Model {
+    // 主键在 DTO 层显式赋值（雪花 ID / uuid），故一律 auto_increment = false
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub {{ pk.column_name }}: {{ pk.rust_type }},
+{% for c in columns %}{% if not c.is_pk %}    pub {{ c.field }}: Option<{{ c.rust_type }}>, // {{ c.comment }}
+{% endif %}{% endfor %}}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+// 别名沿用 backend 既有模块（sys_post 等）的书写习惯
+pub use Model as {{ class_name }};
+pub use Entity as {{ class_name }}Entity;
+pub use ActiveModel as {{ class_name }}ActiveModel;
+pub use Column as {{ class_name }}Column;

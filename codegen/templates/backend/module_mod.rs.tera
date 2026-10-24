@@ -1,0 +1,12 @@
+//! {{ module_name }} 模块（由 codegen 于 {{ generated_at }} 生成）
+//!
+//! 接入 backend 只需两步：
+//! 1. `src/modules/mod.rs` 里加 `pub mod {{ module_name }};`
+//! 2. `src/http_server.rs` 里加
+//!    ```
+//!    web::scope("/{{ module_name }}").configure({{ module_name }}::controller::init)
+//!    ```
+
+pub mod controller;
+pub mod domain;
+pub mod service;

@@ -1,0 +1,5 @@
+//! {{ class_name }} 服务层入口（codegen 生成）
+
+pub mod {{ biz_file }}_service;
+
+pub use {{ biz_file }}_service::{{ class_name }}Service;

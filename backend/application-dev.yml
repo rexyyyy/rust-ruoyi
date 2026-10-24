@@ -1,0 +1,37 @@
+#相对应若依平台的VITE_APP_BASE_API
+server_url: "0.0.0.0:60800"
+base_api: "/dev-api"
+
+#web后台 redis地址(cache_type为“redis”时有效)
+web_redis_url: "redis://localhost:6379" #这是db0
+
+#后台用数据库地址（运行时覆盖，改这里无需重编译）
+# PostgreSQL（原来的本地库，切回时取消下一行注释并注释掉 MySQL 行）
+#database_url: "postgres://postgres:123456@localhost:5434/ruoyirust"
+# MySQL 8（本机 3306，库 ruoyirust 由 script/ry_vue_5.X.sql 初始化）
+# 注意：需用 `cargo build --no-default-features --features mysql` 编译，二进制才带 MySQL 驱动
+database_url: "mysql://root:123456@127.0.0.1:3306/ruoyirust"
+
+
+# 是否启用登录验证码（true 时登录必须带 code+uuid，验证码存 redis 前缀 login_captcha）
+captcha_enabled: true
+
+#接口白名单（免登陆直接访问）
+#说明：登录/验证码等必须免鉴权；头像静态资源由 <img src> 直接请求，
+#      浏览器不会带 Authorization 头，因此也必须免鉴权，否则头像全部 401。
+white_list_api:
+  - "/"
+  - "/dev-api/auth/login"
+  - "/dev-api/auth/logout"
+  - "/dev-api/auth/code"
+  - "/dev-api/auth/register"
+  - "/dev-api/auth/tenant/list"
+  - "/dev-api/resource/sse"
+  - "/dev-api/resource/sse/close"
+  # RuoYi 标准前端顶层路径别名（http_server.rs 中注册的兼容路由）
+  - "/dev-api/captchaImage"
+  - "/dev-api/login"
+  - "/dev-api/logout"
+  - "/dev-api/register"
+  # 静态资源：<img src="/dev-api/profile/avatar/xxx.png"> 不带 token
+  - "/dev-api/profile/avatar"

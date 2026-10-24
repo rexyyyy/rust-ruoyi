@@ -1,0 +1,92 @@
+//! {{ class_name }} 控制器
+//! 源表：{{ table_name }}　业务：{{ function_name }}
+//! 由 codegen 于 {{ generated_at }} 生成。
+//!
+//! 注册方式见同级 `mod.rs` 的 `init()`；本文件的路由挂载在
+//! `http_server.rs` 的 `web::scope("/{{ module_name }}")` 之下。
+
+use actix_web::{delete, get, post, put, web, Responder};
+
+use crate::modules::system::domain::vo::{PageVO, RespVO};
+{% if create_by_expr != "" or update_by_expr != "" %}use crate::web_data::CurrentUser;
+{% endif %}use crate::modules::{{ rust_module }}::domain::bo::{
+    {{ class_name }}AddDTO, {{ class_name }}PageDTO, {{ class_name }}UpdateDTO,
+};
+use crate::modules::{{ rust_module }}::domain::entity::{{ class_name }};
+use crate::modules::{{ rust_module }}::service::{{ class_name }}Service;
+
+fn service() -> {{ class_name }}Service {
+    {{ class_name }}Service {}
+}
+
+/// 分页列表
+#[get("{{ routes.list }}")]
+pub async fn page(query: web::Query<{{ class_name }}PageDTO>) -> impl Responder {
+    let data = service().page(&query).await;
+    PageVO::from_result(&data).resp_json()
+}
+
+/// 详情
+#[get("{{ routes.detail }}")]
+pub async fn detail(id: web::Path<String>) -> impl Responder {
+    let vo = service().detail(&id.into_inner()).await;
+    RespVO::from_result(&vo).resp_json()
+}
+
+/// 新增
+#[post("{{ routes.add }}")]
+pub async fn add({% if create_by_expr != "" %}current_user: CurrentUser, {% endif %}arg: web::Json<{{ class_name }}AddDTO>) -> impl Responder {
+    let mut data = {{ class_name }}::from(arg.0);
+    // 根据需求可以使给主键填业务流水号（按日期前缀取最大号 +1），放开下面两行即可：
+    //let a = crate::modules::system::service::ServiceContext::get_table_maxid("{{ pk.column_name }}", "{{ table_name }}").await ;
+    //{% if pk.rust_type == "String" %}data.{{ pk.column_name }} = a.to_string();
+{% else %}    //data.{{ pk.column_name }} = a;
+{% endif %}{% if create_by_expr != "" %}    data.create_by = Some({{ create_by_expr }});
+{% endif %}    let affected = match service().add(&data).await {
+        Ok(v) => v,
+        Err(e) => return RespVO::<u64>::from_error_info(500, &e.to_string()).resp_json(),
+    };
+    RespVO::<u64>::judge(affected, String::new(), "新增失败！".to_string()).resp_json()
+}
+
+/// 修改
+#[put("{{ routes.update }}")]
+pub async fn update({% if update_by_expr != "" %}current_user: CurrentUser, {% endif %}arg: web::Json<{{ class_name }}UpdateDTO>) -> impl Responder {
+    let mut data = {{ class_name }}::from(arg.0);
+{% if update_by_expr != "" %}    data.update_by = Some({{ update_by_expr }});
+{% endif %}    let affected = match service().update(data).await {
+        Ok(v) => v,
+        Err(e) => return RespVO::<u64>::from_error_info(500, &e.to_string()).resp_json(),
+    };
+    RespVO::<u64>::judge(affected, String::new(), "修改失败！".to_string()).resp_json()
+}
+
+/// 删除
+#[delete("{{ routes.remove }}")]
+pub async fn remove(id: web::Path<String>) -> impl Responder {
+    let affected = match service().remove(&id.into_inner()).await {
+        Ok(v) => v,
+        Err(e) => return RespVO::<u64>::from_error_info(500, &e.to_string()).resp_json(),
+    };
+    RespVO::<u64>::judge(affected, String::new(), "删除失败！".to_string()).resp_json()
+}
+
+/// 导出
+#[post("{{ routes.export }}")]
+pub async fn export(query: web::Query<{{ class_name }}PageDTO>) -> impl Responder {
+    let mut dto = query.0.clone();
+    dto.page_size = Some(10000);
+    let data = service().page(&dto).await;
+    let rows = data.map(|p| p.records).unwrap_or_default();
+    let headers = [{% for c in columns %}"{{ c.comment }}"{% if not loop.last %}, {% endif %}{% endfor %}];
+    let mut body: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+    for r in &rows {
+        body.push(vec![
+{% for c in columns %}            r.{{ c.prop }}.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+{% endfor %}        ]);
+    }
+    match crate::util::excel::build_xlsx("{{ function_name }}", &headers, &body) {
+        Ok(bytes) => crate::util::excel::excel_response(bytes, "{{ business_name }}.xlsx"),
+        Err(e) => RespVO::<String>::from_error_info(500, &e).resp_json(),
+    }
+}

@@ -1,0 +1,92 @@
+//! {{ class_name }} 请求对象（DTO）
+//! 源表：{{ table_name }}　业务：{{ function_name }}
+//! 由 codegen 于 {{ generated_at }} 生成。
+
+use serde::{Deserialize, Serialize};
+
+use crate::modules::system::domain::PageRequest;
+use crate::modules::{{ rust_module }}::domain::entity::{{ class_name }};
+
+/// 分页查询参数
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct {{ class_name }}PageDTO {
+    #[serde(rename(deserialize = "pageNum"))]
+    pub page_no: Option<u64>,
+    #[serde(rename(deserialize = "pageSize"))]
+    pub page_size: Option<u64>,
+{% for c in columns %}{% if c.is_query %}    pub {{ c.field }}: Option<{{ c.rust_type }}>, // {{ c.comment }}
+{% endif %}{% endfor %}}
+
+impl From<{{ class_name }}PageDTO> for PageRequest {
+    fn from(arg: {{ class_name }}PageDTO) -> Self {
+        PageRequest::new(arg.page_no.unwrap_or(1), arg.page_size.unwrap_or(10))
+    }
+}
+
+impl From<&{{ class_name }}PageDTO> for PageRequest {
+    fn from(arg: &{{ class_name }}PageDTO) -> Self {
+        PageRequest::new(arg.page_no.unwrap_or(1), arg.page_size.unwrap_or(10))
+    }
+}
+
+/// 新增参数
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct {{ class_name }}AddDTO {
+{% for c in columns %}{% if c.is_insert %}    pub {{ c.field }}: Option<{{ c.rust_type }}>, // {{ c.comment }}
+{% endif %}{% endfor %}}
+
+impl From<{{ class_name }}AddDTO> for {{ class_name }} {
+    fn from(arg: {{ class_name }}AddDTO) -> Self {
+        Self {
+            {{ pk.column_name }}: {{ pk_new_expr }},
+{% for c in columns %}{% if not c.is_pk %}{% if c.field == "create_time" %}            {{ c.field }}: Some({{ c.now_expr }}),
+{% elif c.is_insert %}            {{ c.field }}: arg.{{ c.field }},
+{% else %}            {{ c.field }}: None,
+{% endif %}{% endif %}{% endfor %}        }
+    }
+}
+
+{% if pk.rust_type != "String" %}/// 兼容前端回传的雪花 ID：字符串 / 整数 / 浮点（JS Number）/ null 四种 JSON 形态均可
+fn string_or_number<'de, D>(deserializer: D) -> Result<Option<{{ pk.rust_type }}>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V {
+        S(String),
+        I({{ pk.rust_type }}),
+        F(f64),
+    }
+    match Option::<V>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(V::S(s)) => s.parse().map(Some).map_err(serde::de::Error::custom),
+        Some(V::I(i)) => Ok(Some(i)),
+        Some(V::F(f)) => Ok(Some(f as {{ pk.rust_type }})),
+    }
+}
+{% endif %}
+/// 修改参数
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct {{ class_name }}UpdateDTO {
+{% if pk.rust_type != "String" %}    // VO 主键输出为 String（防 JS 精度丢失），前端会原样回传，
+    // 因此主键同时接受字符串与数字两种 JSON 形态
+    #[serde(deserialize_with = "string_or_number")]
+{% endif %}    pub {{ pk.column_name }}: Option<{{ pk.rust_type }}>,
+{% for c in columns %}{% if c.is_edit and not c.is_pk %}    pub {{ c.field }}: Option<{{ c.rust_type }}>, // {{ c.comment }}
+{% endif %}{% endfor %}}
+
+impl From<{{ class_name }}UpdateDTO> for {{ class_name }} {
+    fn from(arg: {{ class_name }}UpdateDTO) -> Self {
+        Self {
+            {{ pk.column_name }}: arg.{{ pk.column_name }}.unwrap_or_default(),
+{% for c in columns %}{% if not c.is_pk %}{% if c.field == "update_time" and c.now_expr != "" %}            {{ c.field }}: Some({{ c.now_expr }}),
+{% elif c.is_edit %}            {{ c.field }}: arg.{{ c.field }},
+{% else %}            {{ c.field }}: None,
+{% endif %}{% endif %}{% endfor %}        }
+    }
+}

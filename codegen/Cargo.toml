@@ -1,0 +1,38 @@
+[package]
+name = "codegen"
+version = "0.2.0"
+edition = "2021"
+description = "RuoYi-Rust 代码生成器引擎：读取 PostgreSQL 元数据，按模板生成 actix-web + sea-orm 后端代码与 Vue3 前端代码"
+
+# 既作为库被 backend 依赖，也可独立命令行运行
+[lib]
+name = "codegen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codegen-cli"
+path = "src/main.rs"
+
+[dependencies]
+# —— 与 backend 保持同一套 ORM 与运行时，避免「生成的东西和主项目不是一套」——
+# 注意：`default-features = false` 会连 SQLx 的 postgres 驱动一起关掉，
+# 必须显式打开 `sqlx-postgres`，否则运行时报 "has no supporting driver"。
+sea-orm = { version = "1.1", default-features = false, features = [
+    "runtime-tokio-native-tls",
+    "sqlx-postgres",
+    "macros",
+    "with-chrono",
+] }
+tokio = { version = "1", features = ["full"] }
+once_cell = "1.20.2"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tera = "1"
+# 说明：ZIP 打包自带实现（STORE 无压缩，见 src/util/ziputil.rs）。
+# zip crate 在 2.x/8.x 之间 API 差异大，为一个仅用于下载打包的小功能引入
+# 版本风险与编译开销并不划算，故不依赖外部 zip 库。
+
+[profile.release]
+lto = true

@@ -1,0 +1,24 @@
+/**
+ * {{ function_name }} 视图对象 {{ class_name }}VO
+ * 源表：{{ table_name }}　由 codegen 于 {{ generated_at }} 生成
+ */
+export interface {{ class_name }}VO {
+  {% for c in columns %}/**
+   * {{ c.comment }}
+   */
+  {% if c.is_pk %}{{ c.prop }}: string | number;{% else %}{{ c.prop }}?: {{ c.ts_type }};{% endif %}
+  {% endfor %}}
+
+/**
+ * {{ function_name }} 查询参数
+ */
+export interface {{ class_name }}Query extends PageQuery {
+  {% for c in columns %}{% if c.is_query %}{{ c.prop }}?: {{ c.ts_type }};
+  {% endif %}{% endfor %}}
+
+/**
+ * {{ function_name }} 表单对象（新增 / 修改共用）
+ */
+export interface {{ class_name }}Form {
+  {% for c in columns %}{% if c.is_pk %}{{ c.prop }}?: string | number;{% elif c.is_insert or c.is_edit %}{{ c.prop }}?: {{ c.ts_type }};{% endif %}
+  {% endfor %}}

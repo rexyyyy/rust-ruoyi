@@ -1,0 +1,101 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'backend'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=backend"
+                ],
+                "filter": {
+                    "name": "backend",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'ruoyi_rust_dev'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ruoyi_rust_dev",
+                    "--package=backend"
+                ],
+                "filter": {
+                    "name": "ruoyi_rust_dev",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'ruoyi_rust_dev'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=ruoyi_rust_dev",
+                    "--package=backend"
+                ],
+                "filter": {
+                    "name": "ruoyi_rust_dev",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'ruoyi_rust_prod'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ruoyi_rust_prod",
+                    "--package=backend"
+                ],
+                "filter": {
+                    "name": "ruoyi_rust_prod",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'ruoyi_rust_prod'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=ruoyi_rust_prod",
+                    "--package=backend"
+                ],
+                "filter": {
+                    "name": "ruoyi_rust_prod",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

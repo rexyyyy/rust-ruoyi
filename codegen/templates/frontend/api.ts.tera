@@ -1,0 +1,46 @@
+import request from '@/utils/request';
+import { {{ class_name }}Form, {{ class_name }}Query, {{ class_name }}VO } from './types';
+import { AxiosPromise } from 'axios';
+
+// 查询{{ function_name }}列表
+export const list{{ class_name }} = (query: {{ class_name }}Query): AxiosPromise<{{ class_name }}VO[]> => {
+  return request({
+    url: '{{ api_path }}/list',
+    method: 'get',
+    params: query
+  });
+};
+
+// 查询{{ function_name }}详细
+export const get{{ class_name }} = ({{ pk.prop }}: string | number): AxiosPromise<{{ class_name }}VO> => {
+  return request({
+    url: '{{ api_path }}/' + {{ pk.prop }},
+    method: 'get'
+  });
+};
+
+// 新增{{ function_name }}
+export const add{{ class_name }} = (data: {{ class_name }}Form) => {
+  return request({
+    url: '{{ api_path }}',
+    method: 'post',
+    data: data
+  });
+};
+
+// 修改{{ function_name }}
+export const update{{ class_name }} = (data: {{ class_name }}Form) => {
+  return request({
+    url: '{{ api_path }}',
+    method: 'put',
+    data: data
+  });
+};
+
+// 删除{{ function_name }}
+export const del{{ class_name }} = ({{ pk.prop }}: string | number | Array<string | number>) => {
+  return request({
+    url: '{{ api_path }}/' + {{ pk.prop }},
+    method: 'delete'
+  });
+};
