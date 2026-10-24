@@ -55,6 +55,19 @@ impl SysRoleMenuService {
             .rows_affected)
     }
 
+    /// 按多个 menu_id 一次删除（IN 条件，单条 SQL）。
+    /// 供菜单级联删除等批量场景使用，避免逐条 DELETE 的 N 次往返。
+    pub async fn remove_by_menu_ids(&self, menu_ids: &[i64]) -> Result<u64> {
+        if menu_ids.is_empty() {
+            return Ok(0);
+        }
+        Ok(SysRoleMenuEntity::delete_many()
+            .filter(SysRoleMenuColumn::MenuId.is_in(menu_ids.to_vec()))
+            .exec(pool!())
+            .await?
+            .rows_affected)
+    }
+
     pub async fn remove_by_role_id(&self, role_id: i64) -> Result<u64> {
         Ok(SysRoleMenuEntity::delete_many()
             .filter(SysRoleMenuColumn::RoleId.eq(role_id))

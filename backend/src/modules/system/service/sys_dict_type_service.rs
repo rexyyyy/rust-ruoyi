@@ -82,26 +82,28 @@ impl SysDictTypeService {
     }
 
     pub async fn remove(&self, dict_id: &str) -> Result<u64> {
-        let targets = SysDictTypeEntity::find()
+        // 按主键取单行：one() 会附 LIMIT 1，无需先把整结果集拉成 Vec 再数长度
+        let target = SysDictTypeEntity::find()
             .filter(SysDictTypeColumn::DictId.eq(dict_id.parse::<i64>().unwrap_or(0)))
-            .all(pool!())
+            .one(pool!())
             .await?;
 
-        if targets.len() == 1 {
-            let dict_type = targets.get(0).unwrap().dict_type.clone().unwrap(); 
-            // 存在子项指「字典数据」，不是字典类型表自身（否则统计到当前行，永远删不掉）
-            let row = pool!()
-                .query_one(crate::db::raw_stmt(
-                                        "select count(1) as count from sys_dict_data where dict_type = $1",
-                    vec![Value::from(dict_type)],
-                ))
-                .await?;
-            let count: i64 = match row {
-                Some(r) => r.try_get::<i64>("", "count").unwrap_or(0),
-                None => 0,
-            };
-            if count > 0 { return Err(Error::from("存在子项,不允许删除！")); }
-        } else { return Err(Error::from(format!("字典id{}不存在！", dict_id))); }
+        let dict_type = match target.as_ref().and_then(|t| t.dict_type.clone()) {
+            Some(dt) => dt,
+            None => return Err(Error::from(format!("字典id{}不存在！", dict_id))),
+        };
+        // 存在子项指「字典数据」，不是字典类型表自身（否则统计到当前行，永远删不掉）
+        let row = pool!()
+            .query_one(crate::db::raw_stmt(
+                "select count(1) as count from sys_dict_data where dict_type = $1",
+                vec![Value::from(dict_type)],
+            ))
+            .await?;
+        let count: i64 = match row {
+            Some(r) => r.try_get::<i64>("", "count").unwrap_or(0),
+            None => 0,
+        };
+        if count > 0 { return Err(Error::from("存在子项,不允许删除！")); }
 
         let r = SysDictTypeEntity::delete_many()
             .filter(SysDictTypeColumn::DictId.eq(dict_id.parse::<i64>().unwrap_or(0)))
@@ -110,8 +112,12 @@ impl SysDictTypeService {
             .rows_affected;
         if r > 0 {
             CONTEXT.sys_dict_data_service.update_cache().await?;
-            //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_dict_type", &targets).await?;
+            //copy data to trash（保持与原来一致的「数组」JSON 形态）
+            let trash: &[SysDictType] = match &target {
+                Some(t) => std::slice::from_ref(t),
+                None => &[],
+            };
+            CONTEXT.sys_trash_service.add("sys_dict_type", trash).await?;
         }
         Ok(r)
     }

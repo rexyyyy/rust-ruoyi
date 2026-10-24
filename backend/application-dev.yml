@@ -2,7 +2,8 @@
 server_url: "0.0.0.0:60800"
 base_api: "/dev-api"
 
-#web后台 redis地址(cache_type为“redis”时有效)
+#web后台 redis地址（cache_type 为 "redis" 时有效）
+#默认 cache_type="moka"（进程内缓存），本地开发无需起 Redis 即可运行。
 web_redis_url: "redis://localhost:6379" #这是db0
 
 #后台用数据库地址（运行时覆盖，改这里无需重编译）

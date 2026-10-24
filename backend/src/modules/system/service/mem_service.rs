@@ -1,5 +1,7 @@
 use crate::error::Result;
 use crate::modules::system::service::ICacheService;
+// 与 moka 后端共用同一套通配符语义，保证切换 cache_type 后 keys() 行为一致。
+use crate::modules::system::service::cache_service::glob_match;
 use futures_util::future::BoxFuture;
 use parking_lot::Mutex;
 use std::collections::hash_map::RandomState;
@@ -142,14 +144,36 @@ impl ICacheService for MemService {
     }
 
     fn keys(&self, k: &str) -> BoxFuture<'_, Result<Vec<String>>> {
-        Box::pin(async move { Err(crate::error::Error::from("not implemented!")) })
+        self.recycling();
+        let guard = self.cache.lock();
+        let mut out: Vec<String> = guard
+            .keys()
+            .filter(|key| glob_match(k, key.as_str()))
+            .cloned()
+            .collect();
+        drop(guard);
+        out.sort();
+        Box::pin(async move { Ok(out) })
     }
     fn hgetall(&self, k: &str) -> BoxFuture<'_, Result<Vec<String>>> {
         Box::pin(async move { Err(crate::error::Error::from("not implemented!")) })
     }
 
     fn expire(&self, k: &str, time_sec: i32) -> BoxFuture<'_, Result<bool>> {
-        Box::pin(async move { Err(crate::error::Error::from("not implemented!")) })
+        self.recycling();
+        let mut guard = self.cache.lock();
+        let ok = match guard.get_mut(k) {
+            Some(slot) => {
+                slot.1 = Some((
+                    Instant::now(),
+                    Duration::from_secs(time_sec.max(1) as u64),
+                ));
+                true
+            }
+            None => false,
+        };
+        drop(guard);
+        Box::pin(async move { Ok(ok) })
     }
 
     fn hset(&self, k: &str, f: &str, v: &str) -> BoxFuture<'_, Result<u64>> {

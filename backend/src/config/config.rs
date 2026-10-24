@@ -1,6 +1,19 @@
 use std::fs;
 use merge_yaml_hash::{MergeYamlHash};
 
+/// serde 默认值：未显式配置时默认走进程内 moka 缓存，零外部依赖即可启动。
+fn default_cache_type() -> String {
+    "moka".to_string()
+}
+/// moka 默认容量预算 64MB（按 key+value 字节 weigher 计）。
+fn default_cache_max_capacity_mb() -> u64 {
+    64
+}
+/// 默认 60 秒做一次缓存维护。
+fn default_cache_maintain_secs() -> u64 {
+    60
+}
+
 /// Config
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ApplicationConfig {
@@ -21,7 +34,24 @@ pub struct ApplicationConfig {
     pub sms_cache_send_key_prefix: String,
     pub jwt_secret: String,
     pub white_list_api: Vec<String>,
+    /// 缓存后端类型：`moka`（默认，进程内 LRU+TTL）/ `redis` / `mem`（旧 HashMap 实现）。
+    /// 配置文件留空或写了未知值时，都回落到 `moka` 并记 warn，不再 panic。
+    #[serde(default = "default_cache_type")]
     pub cache_type: String,
+    /// moka 加权容量预算（MB）。weigher 按 key+value 字节计，达到上限按 TinyLFU 淘汰。
+    #[serde(default = "default_cache_max_capacity_mb")]
+    pub cache_max_capacity_mb: u64,
+    /// moka 兜底 TTL（秒）：0 = 不设全局上限，每条只按 set_string_ex 传入的过期时间；
+    /// >0 时作为「最长存活时间」上限，防止无 TTL 的 key（如字典/菜单）永久驻留。
+    #[serde(default)]
+    pub cache_ttl_secs: u64,
+    /// moka 空闲淘汰时长（秒）：0 = 关闭按空闲淘汰（只按 TTL）。
+    #[serde(default)]
+    pub cache_time_to_idle_secs: u64,
+    /// 缓存周期维护间隔（秒）：定期 run_pending_tasks，使零流量时也能驱逐过期条目、
+    /// 刷新 entry_count 计数（moka 计数是最终一致的）。0 = 关闭周期维护。
+    #[serde(default = "default_cache_maintain_secs")]
+    pub cache_maintain_secs: u64,
     pub login_fail_retry: u64,
     pub login_fail_retry_wait_sec: u64,
     pub captcha_enabled: bool,

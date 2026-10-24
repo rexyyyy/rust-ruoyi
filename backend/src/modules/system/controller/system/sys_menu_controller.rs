@@ -1,7 +1,8 @@
 use crate::modules::system::domain::bo::menu::{MenuAddDTO, MenuPageDTO, MenuUpdateDTO};
 use crate::web_data::CurrentUser;
 use crate::modules::system::domain::{SysMenu, SysMenuEntity, SysMenuColumn};
-use sea_orm::{EntityTrait, ColumnTrait, QueryFilter};
+use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, QuerySelect};
+use std::collections::{HashMap, HashSet, VecDeque};
 use crate::modules::system::domain::vo::{RespJson, RespVO};
 use crate::modules::system::service::CONTEXT;
 use actix_web::{get, post, put, delete, web, Responder, HttpRequest};
@@ -133,33 +134,58 @@ pub async fn role_menu_treeselect(req: HttpRequest, role_id: web::Path<String>) 
 #[delete("/menu/cascade/{menu_ids}")]
 pub async fn cascade_delete(menu_ids: web::Path<String>) -> impl Responder {
     let menu_ids = menu_ids.into_inner();
-    let ids: Vec<i64> = menu_ids.split(",").filter_map(|s| s.trim().parse::<i64>().ok()).collect();
-    let mut affected = 0u64;
-    for id in ids {
-        // 递归收集该菜单及其全部子孙节点
-        let mut to_delete: Vec<i64> = vec![id];
-        let mut idx = 0;
-        while idx < to_delete.len() {
-            let pid = to_delete[idx];
-            let children: Vec<SysMenu> = SysMenuEntity::find()
-                .filter(SysMenuColumn::ParentId.eq(pid))
-                .all(crate::pool!())
-                .await
-                .unwrap_or_default();
-            for ch in children {
-                to_delete.push(ch.menu_id);
-            }
-            idx += 1;
-        }
-        for mid in to_delete {
-            let r = CONTEXT.sys_menu_service.remove(&mid).await;
-            match r {
-                Ok(n) => affected += n,
-                Err(e) => return RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json(),
-            }
-            let _ = CONTEXT.sys_role_menu_service.remove_by_menu_id(mid).await;
+    let roots: Vec<i64> = menu_ids
+        .split(",")
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .collect();
+    if roots.is_empty() {
+        return RespVO::from_result(&Ok(0u64)).resp_json();
+    }
+
+    // 1) 一次取出全表「menu_id -> parent_id」，在内存中 BFS 收集待删集合。
+    //    原实现是「每节点一次 SELECT 查子节点」的 N+1，删一棵深树要打几十次库。
+    let pairs: Vec<(Option<i64>, Option<i64>)> = SysMenuEntity::find()
+        .select_only()
+        .column(SysMenuColumn::MenuId)
+        .column(SysMenuColumn::ParentId)
+        .into_tuple()
+        .all(crate::pool!())
+        .await
+        .unwrap_or_default();
+
+    let mut children_of: HashMap<i64, Vec<i64>> = HashMap::with_capacity(pairs.len());
+    for (mid, pid) in pairs {
+        if let (Some(m), Some(p)) = (mid, pid) {
+            children_of.entry(p).or_default().push(m);
         }
     }
-    CONTEXT.sys_menu_service.update_cache().await;
+
+    let mut to_delete: Vec<i64> = Vec::new();
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut queue: VecDeque<i64> = roots.into_iter().collect();
+    while let Some(id) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue; // 多个根节点可能共享子孙，去重
+        }
+        to_delete.push(id);
+        if let Some(kids) = children_of.get(&id) {
+            queue.extend(kids.iter().copied());
+        }
+    }
+
+    // 2) 批量删除：菜单、角色-菜单关联各一条 SQL。
+    //    原实现逐条走 service.remove()，而 remove 内部每次都全表重查 + 写 Redis 缓存，
+    //    删 N 个节点就是 N 次缓存刷新（严重写放大）。这里改成批量删除 + 末尾只刷一次。
+    let affected = match CONTEXT.sys_menu_service.remove_batch(&to_delete).await {
+        Ok(n) => n,
+        Err(e) => return RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json(),
+    };
+    let _ = CONTEXT
+        .sys_role_menu_service
+        .remove_by_menu_ids(&to_delete)
+        .await;
+
+    // 3) 统一刷新一次菜单缓存
+    let _ = CONTEXT.sys_menu_service.update_cache().await;
     RespVO::from_result(&Ok(affected)).resp_json()
 }

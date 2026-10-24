@@ -88,22 +88,23 @@ impl SysUserService {
         return Ok(user_vo);
     }
 
+    /// 按主键查单个用户。
+    ///
+    /// 用 `one()` 而非 `all().into_iter().next()`：前者给 SQL 加 `LIMIT 1`，
+    /// 由数据库侧截断结果集，也省去中间的 Vec 分配。
     pub async fn find(&self, user_id: &str) -> Result<Option<SysUser>> {
         Ok(SysUserEntity::find()
             .filter(SysUserColumn::UserId.eq(user_id.parse::<i64>().unwrap_or(0)))
-            .all(pool!())
-            .await?
-            .into_iter()
-            .next())
+            .one(pool!())
+            .await?)
     }
 
+    /// 按账号查单个用户（登录路径高频）。同 [`Self::find`]，走 `LIMIT 1`。
     pub async fn find_by_account(&self, user_name: &str) -> Result<Option<SysUser>> {
         Ok(SysUserEntity::find()
             .filter(SysUserColumn::UserName.eq(user_name.to_string()))
-            .all(pool!())
-            .await?
-            .into_iter()
-            .next())
+            .one(pool!())
+            .await?)
     }
 
     pub async fn add(&self, mut user: SysUser) -> Result<u64> {

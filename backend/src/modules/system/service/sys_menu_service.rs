@@ -67,12 +67,11 @@ impl SysMenuService {
     ///menu details
     pub async fn detail(&self, menu_id: &str) -> Result<SysMenuVO> {
         let menuid: i64 = menu_id.parse().unwrap_or(0);
+        // one() 走 LIMIT 1，避免 `all()` 先物化整个结果集再取首行
         let menu = SysMenuEntity::find()
             .filter(SysMenuColumn::MenuId.eq(menuid))
-            .all(pool!())
+            .one(pool!())
             .await?
-            .into_iter()
-            .next()
             .ok_or_else(|| Error::from(format!("不存在:{:?} 不存在！", menu_id)))?;
         let menu_vo = SysMenuVO::from(menu);
         return Ok(menu_vo);
@@ -99,6 +98,22 @@ impl SysMenuService {
 
         self.update_cache().await?;
         return Ok(num);
+    }
+
+    /// 批量删除菜单（**不刷新**菜单缓存）。
+    ///
+    /// 与 [`Self::remove`] 的差别就是不动缓存：级联删除会一次删掉几十上百个节点，
+    /// 若逐个走 `remove`，每个都会触发一次「全表 SELECT + Redis SET」的缓存刷新，
+    /// 形成严重的写放大。批量场景应由调用方在末尾统一 `update_cache()` 一次。
+    pub async fn remove_batch(&self, ids: &[i64]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        Ok(SysMenuEntity::delete_many()
+            .filter(SysMenuColumn::MenuId.is_in(ids.to_vec()))
+            .exec(pool!())
+            .await?
+            .rows_affected)
     }
 
     pub async fn get_menu_list_by_user_id(&self, user_id: i64) -> Result<Vec<SysMenuVO>> {
@@ -216,15 +231,15 @@ impl SysMenuService {
         let filtered_menus = if user_cache.user_name == ADMIN_NAME {
             all_menus
         } else {
-            let mut t = vec![];
-            for v in all_menus {
-                for x in &user_cache.menu_ids {
-                    if v.menu_id == Some(*x) {
-                        t.push(v.clone());
-                    }
-                }
-            }
-            t
+            // 原实现是「遍历全部菜单 × 遍历用户 menu_ids」的双层扫描 O(n*m)，
+            // 每个命中还要 clone 一份。改为先把 menu_ids 建成哈希集合，
+            // 再对菜单做单次线性过滤，复杂度降为 O(n+m)。
+            let owned: std::collections::HashSet<i64> =
+                user_cache.menu_ids.iter().copied().collect();
+            all_menus
+                .into_iter()
+                .filter(|v| v.menu_id.map(|id| owned.contains(&id)).unwrap_or(false))
+                .collect()
         };
 
         let menu_tree = self.build_menu_tree(&filtered_menus)?;

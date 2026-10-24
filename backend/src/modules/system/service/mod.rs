@@ -1,5 +1,6 @@
 mod cache_service;
 mod mem_service;
+mod moka_service;
 mod redis_service;
 
 mod sys_config_service;
@@ -21,6 +22,7 @@ mod sys_user_service;
 pub use crate::config::config::ApplicationConfig;
 pub use cache_service::*;
 pub use mem_service::*;
+pub use moka_service::*;
 use once_cell::sync::Lazy;
 pub use redis_service::*;
 pub use sys_config_service::*;

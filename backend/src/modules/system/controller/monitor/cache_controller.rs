@@ -13,6 +13,7 @@ pub async fn get_info() -> impl Responder {
     }
     // 前端 views/monitor/cache/index.vue 取 res.data.{info,dbSize,commandStats}，必须包 data 层
     // 注：完整 Redis INFO 需要给 cache_service 增加 INFO 命令支持，此处先返回可渲染结构
+    // cacheBackend：当前缓存后端（moka/redis/mem）；cacheEntries：进程内条目数（redis/mem 恒为 0）
     res.insert(
         "data".to_string(),
         serde_json::json!({
@@ -20,6 +21,8 @@ pub async fn get_info() -> impl Responder {
             "keyCount": key_count,
             "dbSize": key_count,
             "commandStats": [],
+            "cacheBackend": CONTEXT.cache_service.backend(),
+            "cacheEntries": CONTEXT.cache_service.entry_count().await,
             "info": {}
         }),
     );

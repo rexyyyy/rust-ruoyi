@@ -60,6 +60,16 @@ async fn async_main() -> std::io::Result<()> {
     }
     backend::modules::job::service::start_scheduler();
 
+    // 缓存周期维护（对 moka 后端有效，redis/mem 为空操作）：定期 run_pending_tasks，
+    // 保证低流量时段过期条目也能被真正驱逐、计数被刷新；cache_maintain_secs=0 时关闭。
+    CONTEXT
+        .cache_service
+        .spawn_maintainer(app_state.config.cache_maintain_secs);
+    println!(
+        "[ruoyi_rust] cache backend: {}",
+        CONTEXT.cache_service.backend()
+    );
+
     ckpt("step1: before dict update_cache");
     if let Err(e) = CONTEXT.sys_dict_data_service.update_cache().await {
         eprintln!("[FATAL] dict update_cache failed: {e}");

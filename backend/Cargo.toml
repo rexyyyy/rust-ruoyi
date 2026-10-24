@@ -58,6 +58,10 @@ futures-util = "0.3.31"
 redis = { version = "0.29.1", features = ["tokio-comp", "connection-manager"] }
 
 parking_lot = "0.12.3"
+
+# 进程内高性能缓存：LRU/TinyLFU 淘汰 + TTL + 加权容量预算，作为 cache_type 的默认后端。
+# 依赖 feature "future"（异步 API），不使用 sync 版本。
+moka = { version = "0.12", features = ["future"] }
 uuid = { version = "1.10.0", features = ["v4"] }
 url = "2.5.2"
 chrono = { version = "0.4.38", features = ["serde"] }

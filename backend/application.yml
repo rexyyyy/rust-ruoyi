@@ -7,8 +7,24 @@ server_url: "0.0.0.0:60800"
 #相对应若依平台的VITE_APP_BASE_API
 base_api: "/dev-api"
 
-#缓存介质类型,单选("mem","redis")
-cache_type: "redis"
+#缓存后端类型，单选("moka","redis","mem")
+#  moka（默认，推荐）：进程内 TinyLFU + TTL + 加权容量预算，零外部依赖即可启动；
+#                     注意会话数据存在进程内存中，多实例部署必须改用 redis 才能共享登录态。
+#  redis：多实例共享会话/缓存时使用，需配置下面的 web_redis_url。
+#  mem ：旧 HashMap 实现，无容量上限且每次读写都全表扫描，不建议生产使用。
+#留空或写成未知值时，会回落到 moka 并记 warn（不会 panic）。
+cache_type: "moka"
+
+# ---- 仅 cache_type = "moka" 时生效 ----
+#加权容量预算（MB）：按 key+value 字节数计，达到上限按 TinyLFU 淘汰冷数据
+cache_max_capacity_mb: 64
+#兜底 TTL（秒）：0=不设全局上限（每条只按写入时的过期时间生效）；
+#               >0 作为「最长存活时间」上限，防止无过期时间的 key（字典/菜单）永久驻留
+cache_ttl_secs: 0
+#空闲淘汰时长（秒）：0=关闭按空闲淘汰（只按 TTL）
+cache_time_to_idle_secs: 0
+#周期维护间隔（秒）：定期执行 moka 后台维护，使零流量时也能驱逐过期条目、刷新计数。0=关闭
+cache_maintain_secs: 60
 
 #web后台 redis地址(cache_type为“redis”时有效)
 web_redis_url: "redis://:zlzx@123@server146:16379" #这是db0

@@ -27,6 +27,31 @@ static LAST_FIRE: Lazy<Mutex<HashMap<i64, DateTime<Utc>>>> = Lazy::new(|| Mutex:
 /// 并发受限（concurrent='0'）任务当前是否仍在执行中。
 static INFLIGHT: Lazy<Mutex<HashMap<i64, ()>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// cron 表达式解析结果缓存（表达式原文 -> Schedule）。
+///
+/// 调度器每秒 tick 一次，若每个任务都重新 `Schedule::from_str`，就是
+/// 「每秒 × 任务数」次表达式解析（内部要做字段切分与取值域构造），纯属浪费。
+/// 表达式几乎不变，缓存后仅在首次出现时解析一次；键的数量等于不同表达式的个数，有界。
+static CRON_CACHE: Lazy<Mutex<HashMap<String, Schedule>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 取（并缓存）cron 表达式的解析结果；表达式非法时返回 None（不缓存失败结果）。
+fn cached_schedule(expr: &str) -> Option<Schedule> {
+    let mut guard = match CRON_CACHE.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            // 锁中毒时退化为「每次现解析」，保证调度不中断
+            return Schedule::from_str(expr).ok();
+        }
+    };
+    if let Some(s) = guard.get(expr) {
+        return Some(s.clone());
+    }
+    let s = Schedule::from_str(expr).ok()?;
+    guard.insert(expr.to_string(), s.clone());
+    Some(s)
+}
+
 #[inline]
 fn db() -> Result<&'static DatabaseConnection> {
     state::db().ok_or_else(|| Error::from("db not initialized"))
@@ -362,10 +387,11 @@ pub fn start_scheduler() {
                     Some(e) if !e.is_empty() => e,
                     _ => continue,
                 };
-                let schedule = match Schedule::from_str(expr) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        log::warn!("[job-scheduler] bad cron for job {}: {e}", job.job_id);
+                // 走缓存：避免每秒为每个任务重复解析 cron 表达式
+                let schedule = match cached_schedule(expr) {
+                    Some(s) => s,
+                    None => {
+                        log::warn!("[job-scheduler] bad cron for job {}: {}", job.job_id, expr);
                         continue;
                     }
                 };

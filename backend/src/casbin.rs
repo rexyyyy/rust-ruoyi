@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
@@ -26,6 +27,22 @@ use casbin::{DefaultModel, Enforcer, Error};
 pub const DOMAIN: &str = "system";
 
 static ENFORCER: OnceCell<Arc<RwLock<Enforcer>>> = OnceCell::new();
+
+/// 「策略表非空」标志。
+///
+/// `Enforcer::get_policy()` 会把整张策略表克隆成一个 `Vec<Vec<String>>`
+/// （每条策略 4 个 String），在每请求鉴权路径上调用会造成可观的堆分配。
+/// 策略只在启动期由 [`bootstrap_policies`] 写入、此后无运行时增删，
+/// 因此把「是否为空」缓存成原子标志，鉴权时零分配读取。
+static POLICY_NON_EMPTY: AtomicBool = AtomicBool::new(false);
+
+/// 依据当前 enforcer 实际策略刷新 [`POLICY_NON_EMPTY`]。
+///
+/// 任何会改变策略集合的操作（播种、新增/删除策略、save_policy）之后都应调用，
+/// 否则缓存标志会与实际策略脱节。
+pub fn refresh_policy_flag(e: &Enforcer) {
+    POLICY_NON_EMPTY.store(!e.get_policy().is_empty(), Ordering::Relaxed);
+}
 
 /// 加载模型 + sea-orm 适配器，构建全局 enforcer。
 /// 返回 `true` 表示已就绪；任何失败都记 warn 并返回 `false`，调用方降级。
@@ -50,6 +67,8 @@ pub async fn init_enforcer(db: &sea_orm::DatabaseConnection) -> bool {
     };
     match Enforcer::new(model, adapter).await {
         Ok(e) => {
+            // casbin_rule 可能已存在历史策略，据此初始化「策略非空」标志
+            refresh_policy_flag(&e);
             let _ = ENFORCER.set(Arc::new(RwLock::new(e)));
             log::info!("[ruoyi_rust] casbin enforcer ready");
             true
@@ -81,7 +100,10 @@ pub async fn enforce(user: &str, path: &str, method: &str) -> casbin::Result<boo
     let e = g.read().await;
     // fail-closed：无策略时不放行（除中间件对 admin 的显式放行外）。
     // 避免策略表被清空 / 迁移未完成时，所有登录用户越权访问。
-    if e.get_policy().is_empty() {
+    //
+    // 这里读原子标志而非 `e.get_policy().is_empty()`：后者每次调用都会克隆整张
+    // 策略表（Vec<Vec<String>>），在每请求路径上是纯粹的浪费。
+    if !POLICY_NON_EMPTY.load(Ordering::Relaxed) {
         log::warn!("[ruoyi_rust] casbin policy empty, deny by default");
         return Ok(false);
     }
@@ -247,5 +269,7 @@ pub async fn bootstrap_policies() {
         log::warn!("[ruoyi_rust] casbin bootstrap: save_policy failed: {}", e2);
         return;
     }
+    // 播种完成，刷新「策略非空」标志，使鉴权路径从此真正生效
+    refresh_policy_flag(&e);
     log::info!("[ruoyi_rust] casbin policies bootstrapped from role/menu tables");
 }
