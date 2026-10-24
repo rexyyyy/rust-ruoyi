@@ -1,5 +1,7 @@
 # rust-ruoyi — 基于 Rust 的 RuoYi 企业级快速开发框架
 
+**简体中文 | [English](README.en.md)**
+
 **QQ交流群：694734955**
 
 ---
