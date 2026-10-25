@@ -8,6 +8,8 @@
 --   3. 工作流菜单 + 角色授权
 --
 -- 说明：
+--   - 与 workflow_mysql.sql 是同一份结构的双方言版本，表名/列名/长度逐列对齐，
+--     改一边务必同步另一边；
 --   - 脚本可重复执行（IF NOT EXISTS / WHERE NOT EXISTS）；
 --   - 示例流程 leave1 不在这里插数据：后端启动时由
 --     `modules::workflow::service::demo` 自动导入并发布；
