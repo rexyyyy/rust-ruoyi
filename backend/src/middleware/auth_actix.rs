@@ -15,6 +15,11 @@ use crate::modules::system::domain::vo::RespVO;
 use crate::token_auth::{checked_token, is_white_list_api, get_token};
 use crate::web_data::CurrentUser;
 
+/// 是否 warm-flow 设计器接口（见 `http_server.rs` 里的 `warm_flow_web::configure`）
+fn is_designer_api(path: &str) -> bool {
+    path.contains("/warm-flow")
+}
+
 pub struct Auth;
 
 impl<S: 'static> Transform<S, ServiceRequest> for Auth
@@ -82,6 +87,11 @@ where
                 // 2) 权限判定：管理员直接放行；其余必须通过 casbin。
                 // fail-closed：casbin 未就绪 / 执行异常一律拒绝，避免鉴权失效被绕过。
                 let allowed = if data.user_name == ADMIN_NAME {
+                    true
+                } else if is_designer_api(&path) {
+                    // 设计器接口（/warm-flow/**、/warm-flow-ui/**）由 warm-flow 内置提供，
+                    // 没有对应的 sys_menu 权限标识；按「已登录即可用」放行，
+                    // 菜单可见性仍由「工作流」菜单控制。
                     true
                 } else if !casbin::enforcer_ready() {
                     log::warn!(

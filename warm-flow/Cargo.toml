@@ -1,0 +1,53 @@
+# ============================================================================
+# warm-flow 引擎（vendored 进仓）
+#
+# 来源：Dromara Warm-Flow 的 Rust 移植工程 rust-warm-flow，按原样拷贝其
+#       crates/warm-flow-core、warm-flow-orm、warm-flow-web 三个包与 sql/ 目录，
+#       未修改任何源码；仅去掉了独立二进制 warm-flow-server（rust-ruoyi 复用
+#       自身的 actix 服务与配置，不需要独立进程）。
+# 许可：Apache-2.0（各 crate 的 Cargo.toml 中 license 字段声明）。
+# 用途：backend/Cargo.toml 以 path 依赖本目录，使 rust-ruoyi 单仓克隆即可编译，
+#       不再依赖仓库外的兄弟目录。
+# 同步：需要跟进上游改动时，直接从上游对应 crate 覆盖源码并跑一遍工作流回归脚本。
+#
+# 依赖版本与 rust-ruoyi/backend/Cargo.toml 保持一致（actix-web 4.11 / SeaORM 1.1），
+# 便于复用同一套本地依赖缓存。
+# ============================================================================
+[workspace]
+members = [
+    "crates/warm-flow-core",
+    "crates/warm-flow-orm",
+    "crates/warm-flow-web",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["warm-flow-rust"]
+
+[workspace.dependencies]
+warm-flow-core = { path = "crates/warm-flow-core" }
+warm-flow-orm = { path = "crates/warm-flow-orm", default-features = false }
+warm-flow-web = { path = "crates/warm-flow-web" }
+
+actix-web = "4.11"
+actix-cors = "0.7"
+sea-orm = { version = "1.1", default-features = false, features = [
+    "runtime-tokio-native-tls",
+    "macros",
+    "with-chrono",
+] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+thiserror = "2"
+log = "0.4"
+fast_log = "1.7"
+once_cell = "1"
+parking_lot = "0.12"
+futures-util = "0.3"

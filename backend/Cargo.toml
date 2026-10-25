@@ -19,15 +19,24 @@ path = "src/main.rs"
 # 由下面统一透传，保证默认构建只编入 mysql 驱动，不会因 feature 合并再带回 pg 驱动。
 [features]
 default = ["mysql"]
-mysql = ["sea-orm/sqlx-mysql", "sea-orm-adapter/mysql", "codegen/mysql"]
+mysql = ["sea-orm/sqlx-mysql", "sea-orm-adapter/mysql", "codegen/mysql", "warm-flow-orm/mysql"]
 postgresql = [
     "sea-orm/sqlx-postgres",
     "sea-orm-adapter/postgres",
     "codegen/postgres",
+    "warm-flow-orm/postgresql",
 ]
 
 [dependencies]
 codegen = { path = "../codegen", default-features = false }
+# 工作流引擎：vendored 进仓的 warm-flow（独立 workspace，按 path 引入，与 codegen 同一套做法），
+# 克隆本仓库即可编译，不依赖仓库外的兄弟目录。
+# - warm-flow-core  ：引擎 / 实体 / 表达式，不依赖 SeaORM（纯领域层）
+# - warm-flow-orm   ：SeaORM 实体与 WarmStore 实现，驱动 feature 由本包统一透传
+# - warm-flow-web   ：actix-web 设计器接口（/warm-flow/**）
+warm-flow-core = { path = "../warm-flow/crates/warm-flow-core" }
+warm-flow-orm = { path = "../warm-flow/crates/warm-flow-orm", default-features = false }
+warm-flow-web = { path = "../warm-flow/crates/warm-flow-web" }
 actix = "0.13"
 actix-tls = "3.4"
 actix-utils = "3"
@@ -38,6 +47,9 @@ actix-multipart = "0.7"
 actix-files = "0.6"
 actix-ws = "0.3"
 actix-web-validator = "6.0.0"
+# warm-flow 设计器扩展点 `UiExtension` 用 async-trait 声明 async 方法，
+# 业务侧实现时需要同一个宏（版本与 warm-flow-web 保持一致）
+async-trait = "0.1"
 validator ={ version = "0.18", features = ["derive"] } #加入验证框架 "0.18.1"
 
 jsonwebtoken = "9.3.0"

@@ -60,6 +60,13 @@ async fn async_main() -> std::io::Result<()> {
     }
     backend::modules::job::service::start_scheduler();
 
+    // 工作流引擎（warm-flow）：构造 SeaORM 存储 + RuoYi 权限处理器 + 设计器扩展点，
+    // 并在库里没有已发布的 leave1 时自动导入示例流程。
+    // 失败仅告警：工作流不可用不影响系统其它功能（`/workflow`、`/warm-flow` 路由不会挂载）。
+    if let Err(e) = backend::modules::workflow::init().await {
+        eprintln!("[WARN] workflow init failed: {e}");
+    }
+
     // 审计日志（登录/操作日志）批量写入通道：请求侧只做一次 try_send，
     // 后台协程按 200 条 / 500ms 聚合后一条 INSERT 落库，避免每条日志一次事务。
     backend::util::log_sink::init();

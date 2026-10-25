@@ -1,0 +1,16 @@
+[package]
+name = "warm-flow-core"
+description = "Warm-Flow 工作流引擎内核（Java 版 org.dromara.warm.flow.core 的 Rust 移植）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }

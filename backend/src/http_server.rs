@@ -255,7 +255,21 @@ pub fn build_server(app_state: &'static AppState) -> Server {
             ).service(
                 web::scope("/job") //定时任务引擎（自研轮询调度，替代 ruoyi-job）
                     .configure(crate::modules::job::controller::init)
-            )
+            ).service(
+                web::scope("/workflow") //工作流业务接口（镜像 org.dromara.workflow）
+                    .configure(crate::modules::workflow::controller::init)
+            ).configure(|cfg: &mut web::ServiceConfig| {
+                // warm-flow 设计器接口（/warm-flow/**、/warm-flow-ui/**）。
+                // 引擎未初始化时不挂载，避免整个后台因工作流不可用而启动失败。
+                if let Some(engine) = crate::modules::workflow::state::engine() {
+                    let ui: std::sync::Arc<dyn warm_flow_web::UiExtension> =
+                        crate::modules::workflow::ui::ui().clone();
+                    cfg.app_data(web::Data::new(
+                        warm_flow_web::FlowWebState::new(engine.clone()).with_ui(ui),
+                    ));
+                    cfg.configure(warm_flow_web::configure);
+                }
+            })
             .route("/ws/{user_id}", web::get().to(system_websocket::websocket_handler)) //Rust扩展，保留
             .route("/profile/avatar/{file}", web::get().to(sys_profile_controller::serve_avatar)) //头像静态资源，镜像Spring /profile/**
 

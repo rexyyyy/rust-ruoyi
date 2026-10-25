@@ -1,0 +1,24 @@
+[package]
+name = "warm-flow-orm"
+version = "0.1.0"
+edition = "2021"
+description = "warm-flow 的 SeaORM 持久层实现（对应 Java 版 warm-flow-orm）"
+license = "Apache-2.0"
+
+# 双方言支持：mysql（默认）/ postgresql / sqlite。
+# 连接串（mysql:// / postgres:// / sqlite:）决定实际后端，
+# 切到 PostgreSQL：cargo build --no-default-features --features postgresql
+[features]
+default = ["mysql"]
+mysql = ["sea-orm/sqlx-mysql"]
+postgresql = ["sea-orm/sqlx-postgres"]
+sqlite = ["sea-orm/sqlx-sqlite"]
+
+[dependencies]
+warm-flow-core = { path = "../warm-flow-core" }
+sea-orm = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }

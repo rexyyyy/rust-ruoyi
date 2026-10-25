@@ -1,0 +1,14 @@
+[package]
+name = "warm-flow-web"
+version = "0.1.0"
+edition = "2021"
+description = "warm-flow 的 actix-web 接口层（设计器 API + 业务流程 API）"
+license = "Apache-2.0"
+
+[dependencies]
+warm-flow-core = { workspace = true }
+actix-web = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+log = { workspace = true }

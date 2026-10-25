@@ -17,6 +17,10 @@
 //!
 //! 4. `tool` —— 业务模块：代码生成器（对标 RuoYi `ruoyi-generator`）。
 //!
+//! 5. `workflow` —— 业务模块：工作流（对标 RuoYi `ruoyi-workflow`）。
+//!    把 `rust-warm-flow` 引擎内嵌进本进程，提供流程分类/定义/实例/任务接口，
+//!    以及 warm-flow 设计器所需的扩展点（分类树、办理人选择）。
+//!
 //! 统一内部约定（每个模块根 `mod.rs` 都显式声明）：
 //! - `pub mod controller;`  —— HTTP 接口层（在 `http_server.rs` 中以 `web::scope` 挂载）
 //! - `pub mod service;`     —— 业务逻辑层
@@ -29,3 +33,4 @@ pub mod system; // 框架核心包
 pub mod demo;   // 首个业务模块（模板）
 pub mod job;    // 业务模块：动态定时任务
 pub mod tool;   // 业务模块：代码生成器
+pub mod workflow; // 业务模块：工作流（内嵌 warm-flow 引擎）
