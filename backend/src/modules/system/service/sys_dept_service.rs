@@ -8,6 +8,7 @@ use crate::pool;
 use crate::modules::system::service::CONTEXT;
 use sea_orm::entity::*;
 use sea_orm::query::*;
+use sea_orm::TransactionTrait;
 use crate::modules::system::dao::*;
 //const DICT_KEY: &'static str = "sys_dept:all";
 
@@ -72,20 +73,31 @@ impl SysDeptService {
 
     pub async fn remove(&self, dept_id: &str) -> Result<u64> {
         let dept_id_i64 = dept_id.parse::<i64>().unwrap_or(0);
+
+        // 「删部门 + 写回收站」必须原子：否则删除成功却丢了快照，回收站将失去恢复能力。
+        // 任一步 `?` 提前返回时 `txn` 被 drop，sea-orm 自动 rollback。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
+        // 快照在事务内读取，保证与删除操作看到一致的数据
         let targets = SysDeptEntity::find()
             .filter(SysDeptColumn::DeptId.eq(dept_id_i64))
-            .all(pool!())
+            .all(&txn)
             .await?;
 
         let rows_affected = SysDeptEntity::delete_many()
             .filter(SysDeptColumn::DeptId.eq(dept_id_i64))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if rows_affected > 0 {
             //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_dept", &targets).await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_dept", &targets)
+                .await?;
         }
+
+        txn.commit().await.map_err(Error::from)?;
         Ok(rows_affected)
     }
     //根据user id获得本单位及下属单位部门列表

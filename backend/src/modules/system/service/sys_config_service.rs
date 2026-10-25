@@ -95,20 +95,32 @@ impl SysConfigService {
     }
 
     pub async fn remove(&self, config_id: &str) -> Result<u64> {
+        // 「删配置 + 写回收站」必须原子；快照在事务内读取以保证与删除一致。
+        // 任一步 `?` 提前返回时 `txn` 被 drop 自动 rollback。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let targets = SysConfigEntity::find()
             .filter(SysConfigColumn::ConfigId.eq(config_id.parse::<i64>().unwrap_or(0)))
-            .all(pool!())
+            .all(&txn)
             .await?;
         let r = SysConfigEntity::delete_many()
             .filter(SysConfigColumn::ConfigId.eq(config_id.parse::<i64>().unwrap_or(0)))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if r > 0 {
             //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_config", &targets).await;
-            CONTEXT.cache_service.del(&self.get_cache_key(targets.into_iter().next().unwrap().config_key.clone().as_ref().unwrap())).await;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_config", &targets)
+                .await?;
+            // 缓存清理不在事务内（缓存与库严格一致由上层 TTL 兜底），但避免了
+            // 原实现 unwrap() 在 config_key 为空时 panic 的隐患。
+            if let Some(key) = targets.first().and_then(|t| t.config_key.as_ref()) {
+                CONTEXT.cache_service.del(&self.get_cache_key(key)).await;
+            }
         }
+        txn.commit().await.map_err(Error::from)?;
         Ok(r)
     }
 

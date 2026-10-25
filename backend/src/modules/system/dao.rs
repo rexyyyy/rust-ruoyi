@@ -16,12 +16,16 @@ use crate::modules::system::domain::{Page, PageRequest};
 use crate::error::{Error, Result};
 
 /// 单条插入，返回受影响行数（sea-orm 不直接给 rows_affected，单条插入恒为 1）。
-pub async fn insert_model<M, A>(db: &DatabaseConnection, m: M) -> Result<u64>
+///
+/// `db` 既可以是连接池连接 `&DatabaseConnection`，也可以是事务句柄
+/// `&DatabaseTransaction`（两者都实现 `ConnectionTrait`），便于把插入并入调用方的事务。
+pub async fn insert_model<M, A, C>(db: &C, m: M) -> Result<u64>
 where
     M: IntoActiveModel<A>,
     A: ActiveModelTrait + ActiveModelBehavior + Send,
     A::Entity: EntityTrait,
     <A::Entity as EntityTrait>::Model: IntoActiveModel<A>,
+    C: ConnectionTrait,
 {
     m.into_active_model()
         .insert(db)
@@ -38,12 +42,13 @@ where
 /// 会得到一条没有 SET 的 UPDATE（执行成功但什么都没改！）。这里统一把
 /// `Unchanged` 提升为 `Set`，实现「传完整模型即全字段写入」的语义，
 /// 与 rbatis `update_by_map`（传完整实体）对齐。
-pub async fn update_model<M, A>(db: &DatabaseConnection, m: M) -> Result<u64>
+pub async fn update_model<M, A, C>(db: &C, m: M) -> Result<u64>
 where
     M: IntoActiveModel<A>,
     A: ActiveModelTrait + ActiveModelBehavior + Send,
     A::Entity: EntityTrait,
     <A::Entity as EntityTrait>::Model: IntoActiveModel<A>,
+    C: ConnectionTrait,
 {
     let mut am = m.into_active_model();
     for col in <A::Entity as EntityTrait>::Column::iter() {
@@ -74,10 +79,15 @@ where
 }
 
 /// 批量插入，返回插入条数。
-pub async fn insert_batch<A>(db: &DatabaseConnection, ams: Vec<A>) -> Result<u64>
+///
+/// `db` 既可以是连接池连接 `&DatabaseConnection`，也可以是事务句柄
+/// `&DatabaseTransaction`（两者都实现 `ConnectionTrait`），因此同一份写入代码
+/// 既能用于普通调用，也能放进事务以保证多步写的原子性。
+pub async fn insert_batch<A, C>(db: &C, ams: Vec<A>) -> Result<u64>
 where
     A: ActiveModelTrait + ActiveModelBehavior + Send,
     A::Entity: EntityTrait,
+    C: ConnectionTrait,
 {
     let n = ams.len() as u64;
     if n == 0 {

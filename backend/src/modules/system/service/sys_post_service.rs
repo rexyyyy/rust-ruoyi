@@ -86,21 +86,31 @@ impl SysPostService {
     }
 
     pub async fn remove(&self, post_id: &str) -> Result<u64> {
+        use sea_orm::TransactionTrait;
         let post_id_i64 = post_id.parse::<i64>().unwrap_or(0);
+
+        // 「删岗位 + 写回收站」必须原子；快照在事务内读取以保证与删除一致。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let targets = SysPostEntity::find()
             .filter(SysPostColumn::PostId.eq(post_id_i64))
-            .all(pool!())
+            .all(&txn)
             .await?;
 
         let r = SysPostEntity::delete_many()
             .filter(SysPostColumn::PostId.eq(post_id_i64))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if r > 0 {
             //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_post", &targets).await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_post", &targets)
+                .await?;
         }
+
+        txn.commit().await.map_err(Error::from)?;
         Ok(r)
     }
 }

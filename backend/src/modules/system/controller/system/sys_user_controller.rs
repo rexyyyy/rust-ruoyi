@@ -31,18 +31,19 @@ pub async fn before_add(arg: web::Query<UserPageDTO>) -> impl Responder {
 
 #[post("/user")]
 pub async fn add(current_user: CurrentUser, arg: web::Json<UserAddDTO>) -> impl Responder {
-    let role_ids = arg.role_ids.clone().unwrap();
+    let role_ids = arg.role_ids.clone().unwrap_or_default();
     let mut data = SysUser::from(arg.0);
-    let user_id = data.user_id.clone();
     data.create_by = Some(current_user.id);
-    let rows_affected = CONTEXT.sys_user_service.add(data).await.unwrap();
-    if rows_affected > 0 {
-        if role_ids.len() > 0 {
-            CONTEXT.sys_user_role_service.add_user_roles(&user_id.to_string(), &role_ids);
+    // 新增用户与角色关联由 service 在同一事务内完成；
+    // 旧实现里的 `add_user_roles(...)` 漏了 `.await`，新用户实际没有任何角色。
+    let rows_affected = match CONTEXT.sys_user_service.add_with_roles(data, &role_ids).await {
+        Ok(n) => n,
+        Err(e) => {
+            CONTEXT.sys_operlog_service.record("用户管理", 1, "POST /system/user", &current_user.name, "/system/user", 1, &format!("新增用户失败: {e}")).await;
+            return RespVO::<u64>::from_error_info(500, &format!("新增用户失败: {e}")).resp_json();
         }
-        //todo 增加post
-    }
-    CONTEXT.sys_operlog_service.record("用户管理", 1, "POST /system/user", &current_user.name, "/system/user", if rows_affected > 0 { 0 } else { 1 }, if rows_affected > 0 { "" } else { "新增用户失败" }).await;
+    };
+    CONTEXT.sys_operlog_service.record("用户管理", 1, "POST /system/user", &current_user.name, "/system/user", 0, "").await;
 
     return RespVO::from_result(&Ok(rows_affected)).resp_json();
 }

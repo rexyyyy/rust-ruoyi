@@ -84,21 +84,31 @@ impl SysNoticeService {
     }
 
     pub async fn remove(&self, notice_id: &str) -> Result<u64> {
+        use sea_orm::TransactionTrait;
         let notice_id_i64 = notice_id.parse::<i64>().unwrap_or(0);
+
+        // 「删通知 + 写回收站」必须原子；快照在事务内读取以保证与删除一致。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let targets = SysNoticeEntity::find()
             .filter(SysNoticeColumn::NoticeId.eq(notice_id_i64))
-            .all(pool!())
+            .all(&txn)
             .await?;
 
         let r = SysNoticeEntity::delete_many()
             .filter(SysNoticeColumn::NoticeId.eq(notice_id_i64))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if r > 0 {
             //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_notice", &targets).await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_notice", &targets)
+                .await?;
         }
+
+        txn.commit().await.map_err(Error::from)?;
         Ok(r)
     }
 }

@@ -108,13 +108,15 @@ pub async fn register(arg: web::Json<SignUpDTO>) -> impl Responder {
         update_time: None,
         remark: None,
     };
-    let user_id = user.user_id.clone();
-    let r = CONTEXT.sys_user_service.add(user).await;
+    // 新增用户 + 分配默认角色（普通角色 role_id=2）在同一事务内完成；
+    // 旧写法 `add_user_roles(...)` 漏了 `.await`，注册用户实际上没有任何角色。
+    let r = CONTEXT
+        .sys_user_service
+        .add_with_roles(user, &["2".to_string()])
+        .await;
     if r.is_err() {
         return RespVO::from_error_result(500, &r).resp_json();
     }
-    // 分配默认角色（普通角色 role_id=2）
-    CONTEXT.sys_user_role_service.add_user_roles(&user_id.to_string(), &vec!["2".to_string()]);
     RespVO::<String>::from_success_info("注册成功").resp_json()
 }
 

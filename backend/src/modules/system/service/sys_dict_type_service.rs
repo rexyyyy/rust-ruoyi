@@ -105,19 +105,31 @@ impl SysDictTypeService {
         };
         if count > 0 { return Err(Error::from("存在子项,不允许删除！")); }
 
+        use sea_orm::TransactionTrait;
+        // 「删字典类型 + 写回收站」必须原子：否则删除成功却丢快照，回收站失去恢复能力。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let r = SysDictTypeEntity::delete_many()
             .filter(SysDictTypeColumn::DictId.eq(dict_id.parse::<i64>().unwrap_or(0)))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if r > 0 {
-            CONTEXT.sys_dict_data_service.update_cache().await?;
             //copy data to trash（保持与原来一致的「数组」JSON 形态）
             let trash: &[SysDictType] = match &target {
                 Some(t) => std::slice::from_ref(t),
                 None => &[],
             };
-            CONTEXT.sys_trash_service.add("sys_dict_type", trash).await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_dict_type", trash)
+                .await?;
+        }
+
+        txn.commit().await.map_err(Error::from)?;
+        // 缓存在**提交成功后**刷新：提交前刷新会让其它请求在回滚期间读到脏缓存
+        if r > 0 {
+            CONTEXT.sys_dict_data_service.update_cache().await?;
         }
         Ok(r)
     }

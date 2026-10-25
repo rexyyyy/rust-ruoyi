@@ -96,19 +96,27 @@ impl DemoCourseService {
 
     /// 删除（写回收站）
     pub async fn remove(&self, id: &str) -> Result<u64> {
+        use sea_orm::TransactionTrait;
+        // 「删课程 + 写回收站」必须原子；快照在事务内读取以保证与删除一致。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let targets = DemoCourseEntity::find()
             .filter(DemoCourseColumn::CourseId.eq(id.parse::<i64>().unwrap_or(0)))
-            .all(pool!())
+            .all(&txn)
             .await?;
         let rows_affected = DemoCourseEntity::delete_many()
             .filter(DemoCourseColumn::CourseId.eq(id.parse::<i64>().unwrap_or(0)))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if rows_affected > 0 {
             // copy data to trash
-            CONTEXT.sys_trash_service.add("demo_course", &targets).await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "demo_course", &targets)
+                .await?;
         }
+        txn.commit().await.map_err(Error::from)?;
         Ok(rows_affected)
     }
 }

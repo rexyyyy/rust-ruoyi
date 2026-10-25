@@ -22,6 +22,8 @@ use crate::util::password_encoder::PasswordEncoder;
 
 use sea_orm::entity::*;
 use sea_orm::query::*;
+// ConnectionTrait / TransactionTrait：把复合写包进单个事务，保证原子性
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use chrono::Local;
 use crate::modules::system::dao::*;
 
@@ -128,6 +130,25 @@ impl SysUserService {
         user.password = Some(password);
 
         Ok(insert_model(pool!(), user).await?)
+    }
+
+    /// 新增用户 + 写角色关联（事务版）。
+    ///
+    /// 旧实现由 controller 先 `add` 再 `add_user_roles`，且调用处漏了 `.await`，
+    /// future 从未被轮询——新用户/注册用户实际一个角色都没有（菜单为空）。
+    /// 这里把两步放进同一事务：用户与角色要么都写入，要么都不写入。
+    pub async fn add_with_roles(&self, user: SysUser, role_ids: &[String]) -> Result<u64> {
+        let txn = pool!().begin().await.map_err(Error::from)?;
+        let user_id = user.user_id.to_string();
+        let r = insert_model(&txn, user).await?;
+        if r > 0 && !role_ids.is_empty() {
+            CONTEXT
+                .sys_user_role_service
+                .add_user_roles_in_txn(&txn, &user_id, role_ids)
+                .await?;
+        }
+        txn.commit().await.map_err(Error::from)?;
+        Ok(r)
     }
 
     //返回token
@@ -317,9 +338,15 @@ impl SysUserService {
         let user = SysUser::from(arg);
         //do not update user_name
         let userid = user.user_id.clone();
-        if role_ids.is_some() {
+
+        // 「重置用户角色 + 更新用户资料」必须原子：旧实现先删插角色、再改用户，
+        // 若改用户失败，角色已经变了（反之亦然），前端看到的却是失败提示。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
+        if let Some(ids) = role_ids {
             CONTEXT
-                .sys_user_role_service.reset_through_user_id(&userid.to_string(), &role_ids.unwrap())
+                .sys_user_role_service
+                .reset_through_user_id_in_txn(&txn, &userid.to_string(), &ids)
                 .await?;
         }
         // 仅更新 DTO 中提供的字段（None 表示不更新，保持原值），等价于 rbatis update_by_map 的跳过 null 语义。
@@ -347,8 +374,9 @@ impl SysUserService {
         let r = SysUserEntity::update_many()
             .set(am)
             .filter(SysUserColumn::UserId.eq(userid))
-            .exec(pool!())
+            .exec(&txn)
             .await?;
+        txn.commit().await.map_err(Error::from)?;
         Ok(r.rows_affected)
     }
 
@@ -359,16 +387,31 @@ impl SysUserService {
 
         // user_id 在库中为 bigint，按字符串比较会导致 PostgreSQL 类型不匹配而删不掉
         let user_id_i64 = id.parse::<i64>().unwrap_or(0);
+
+        // 「删除用户 + 删除角色关联 + 写回收站」是一个原子操作，必须包在同一事务里：
+        // 否则中途失败会留下孤儿角色关联行，或删除成功却丢了回收站快照。
+        // 任一步 `?` 提前返回时，`txn` 被 drop 会自动 rollback。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
+        // 快照必须在事务内读取，保证与后续删除读到一致的数据
         let trash = SysUserEntity::find()
             .filter(SysUserColumn::UserId.eq(user_id_i64))
-            .all(pool!())
+            .all(&txn)
             .await?;
         let r = SysUserEntity::delete_many()
             .filter(SysUserColumn::UserId.eq(user_id_i64))
-            .exec(pool!())
+            .exec(&txn)
             .await?;
-        CONTEXT.sys_trash_service.add("sys_user", &trash).await;
-        CONTEXT.sys_user_role_service.remove_by_user_id(id).await?;
+        CONTEXT
+            .sys_trash_service
+            .add_in_txn(&txn, "sys_user", &trash)
+            .await?;
+        CONTEXT
+            .sys_user_role_service
+            .remove_by_user_id_in_txn(&txn, id)
+            .await?;
+
+        txn.commit().await.map_err(Error::from)?;
         return Ok(r.rows_affected);
     }
 

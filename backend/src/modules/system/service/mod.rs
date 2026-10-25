@@ -42,6 +42,7 @@ pub use sys_user_role_service::*;
 pub use sys_user_service::*;
 
 use chrono::{Datelike, Local};
+use std::sync::Arc;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 /// CONTEXT is all of the service struct
 pub static CONTEXT: Lazy<ServiceContext> = Lazy::new(|| ServiceContext::default());
@@ -66,7 +67,10 @@ macro_rules! get_config_value {
 }
 
 pub struct ServiceContext {
-    pub config: ApplicationConfig,
+    /// 运行配置。与 `crate::state::AppState.config` 共享**同一个 `Arc`**
+    /// （数据源均为 `crate::config::config::global()`），全进程只有一份配置数据，
+    /// 消除历史上「CONTEXT 一份、AppState 一份」的双轨不一致。
+    pub config: Arc<ApplicationConfig>,
     pub cache_service: CacheService,
     pub sys_menu_service: SysMenuService,
     pub sys_user_service: SysUserService,
@@ -137,7 +141,9 @@ impl ServiceContext {
 
 impl Default for ServiceContext {
     fn default() -> Self {
-        let config = ApplicationConfig::default();
+        // 取全局配置单例：**不再**自行加载第二份。`AppState` 会从同一个 Arc 取值，
+        // 两者天然一致（改一处即可被另一处看到）。
+        let config = crate::config::config::global().clone();
         let str = "abcdefghkmnopqrstuwxyz23456789ABCDEFGHKMNOPQRSTUWXYZ";
         let char_array1: Vec<char> = str.chars().collect();
         let char_array2: [char; 52] = char_array1

@@ -468,14 +468,21 @@ impl GenService {
 
     /// 删除配置（含列配置）
     pub async fn remove(&self, table_id: i64) -> Result<u64> {
+        use sea_orm::TransactionTrait;
+        // 「删列配置 + 删表配置」必须原子：否则会残留孤儿列配置，
+        // 导致下次生成同名表时读到上一次的脏列定义。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         gen_table_column::GenTableColumnEntity::delete_many()
             .filter(gen_table_column::GenTableColumnEnum::TableId.eq(table_id))
-            .exec(pool!())
+            .exec(&txn)
             .await?;
         let r = GenTableEntity::delete_many()
             .filter(GenTableColumnEnum::TableId.eq(table_id))
-            .exec(pool!())
+            .exec(&txn)
             .await?;
+
+        txn.commit().await.map_err(Error::from)?;
         Ok(r.rows_affected)
     }
 }

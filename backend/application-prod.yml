@@ -8,6 +8,8 @@ debug: false
 base_api: "/prod-api"
 
 #接口白名单（免登陆直接访问）
+#匹配规则与 application.yml 一致：先剥掉 base_api 再精确比较（或命中目录型前缀的路径段边界），
+#已移除旧的「子串 / 任意后缀」宽松匹配。注意条目必须与当前 base_api（/prod-api）一致。
 white_list_api:
   - "/"
   - "/prod-api/auth/login"
@@ -17,3 +19,10 @@ white_list_api:
   - "/prod-api/auth/tenant/list"
   - "/prod-api/resource/sse"
   - "/prod-api/resource/sse/close"
+  # RuoYi 标准前端顶层路径别名（http_server.rs 中注册的兼容路由）
+  - "/prod-api/captchaImage"
+  - "/prod-api/login"
+  - "/prod-api/logout"
+  - "/prod-api/register"
+  # 静态资源：<img src="/prod-api/profile/avatar/xxx.png"> 不带 token
+  - "/prod-api/profile/avatar"

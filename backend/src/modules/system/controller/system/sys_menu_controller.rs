@@ -1,7 +1,7 @@
 use crate::modules::system::domain::bo::menu::{MenuAddDTO, MenuPageDTO, MenuUpdateDTO};
 use crate::web_data::CurrentUser;
 use crate::modules::system::domain::{SysMenu, SysMenuEntity, SysMenuColumn};
-use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, QuerySelect};
+use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, QuerySelect, TransactionTrait};
 use std::collections::{HashMap, HashSet, VecDeque};
 use crate::modules::system::domain::vo::{RespJson, RespVO};
 use crate::modules::system::service::CONTEXT;
@@ -173,19 +173,47 @@ pub async fn cascade_delete(menu_ids: web::Path<String>) -> impl Responder {
         }
     }
 
-    // 2) 批量删除：菜单、角色-菜单关联各一条 SQL。
-    //    原实现逐条走 service.remove()，而 remove 内部每次都全表重查 + 写 Redis 缓存，
-    //    删 N 个节点就是 N 次缓存刷新（严重写放大）。这里改成批量删除 + 末尾只刷一次。
-    let affected = match CONTEXT.sys_menu_service.remove_batch(&to_delete).await {
-        Ok(n) => n,
-        Err(e) => return RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json(),
+    // 2) 批量删除：菜单、角色-菜单关联必须在**同一事务**内完成。
+    //    否则「菜单删成功、清关联失败」会留下指向已删 menu_id 的孤儿 role_menu 行，
+    //    而旧实现还用 `let _ =` 吞掉关联清理的错误，故障完全不可见。
+    let txn = match crate::pool!().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("[menu cascade] begin txn failed: {e}");
+            return RespVO::from_error_result(500, &Err::<u64, _>(crate::error::Error::from(e)))
+                .resp_json();
+        }
     };
-    let _ = CONTEXT
-        .sys_role_menu_service
-        .remove_by_menu_ids(&to_delete)
-        .await;
 
-    // 3) 统一刷新一次菜单缓存
+    let affected = match CONTEXT
+        .sys_menu_service
+        .remove_batch_in_txn(&txn, &to_delete)
+        .await
+    {
+        Ok(n) => n,
+        Err(e) => {
+            // txn 在此被 drop，sea-orm 自动 rollback
+            log::error!("[menu cascade] delete menus failed, rolled back: {e}");
+            return RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json();
+        }
+    };
+
+    if let Err(e) = CONTEXT
+        .sys_role_menu_service
+        .remove_by_menu_ids_in_txn(&txn, &to_delete)
+        .await
+    {
+        log::error!("[menu cascade] clear role_menu failed, rolled back: {e}");
+        return RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json();
+    }
+
+    if let Err(e) = txn.commit().await {
+        log::error!("[menu cascade] commit failed: {e}");
+        return RespVO::from_error_result(500, &Err::<u64, _>(crate::error::Error::from(e)))
+            .resp_json();
+    }
+
+    // 3) 统一刷新一次菜单缓存（务必在提交成功之后，避免回滚窗口读到脏缓存）
     let _ = CONTEXT.sys_menu_service.update_cache().await;
     RespVO::from_result(&Ok(affected)).resp_json()
 }

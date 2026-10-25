@@ -14,6 +14,7 @@ use crate::config::config::ApplicationConfig;
 use once_cell::sync::OnceCell;
 use redis::Client as RedisClient;
 use sea_orm::DatabaseConnection;
+use std::sync::Arc;
 
 /// 应用状态：数据库连接 + redis 客户端 + 运行配置。
 ///
@@ -24,7 +25,10 @@ use sea_orm::DatabaseConnection;
 pub struct AppState {
     pub db: DatabaseConnection,
     pub redis: RedisClient,
-    pub config: ApplicationConfig,
+    /// 运行配置。与 `crate::modules::system::service::ServiceContext.config`
+    /// 共享同一个 `Arc`（来源均为 `crate::config::config::global()`），
+    /// 因此通过 `AppState.config` 与 `CONTEXT.config` 读写到的是同一份数据。
+    pub config: Arc<ApplicationConfig>,
 }
 
 static APP_STATE: OnceCell<AppState> = OnceCell::new();
@@ -33,7 +37,9 @@ static APP_STATE: OnceCell<AppState> = OnceCell::new();
 pub fn init(
     db: DatabaseConnection,
     redis: RedisClient,
-    config: ApplicationConfig,
+    // 传 Arc 而不是裸结构：`AppState.config` 与 `ServiceContext.config`
+    // 共享同一份配置实例（都来自 `config::config::global()`），不会再出现双轨不一致。
+    config: Arc<ApplicationConfig>,
 ) -> Result<(), String> {
     APP_STATE
         .set(AppState { db, redis, config })
@@ -57,6 +63,11 @@ pub fn redis() -> Option<&'static RedisClient> {
 
 /// 取运行配置。
 pub fn config() -> Option<&'static ApplicationConfig> {
+    APP_STATE.get().map(|s| s.config.as_ref())
+}
+
+/// 取运行配置的共享句柄（需要把配置继续往下传递时用它，避免再 clone 整份数据）。
+pub fn config_arc() -> Option<&'static Arc<ApplicationConfig>> {
     APP_STATE.get().map(|s| &s.config)
 }
 

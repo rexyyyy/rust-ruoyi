@@ -66,11 +66,26 @@ login_fail_retry: 3
 #登陆失败重试次数限制超过后提示的等待时间（秒）
 login_fail_retry_wait_sec: 30
 #接口白名单（免登陆直接访问）
+#匹配规则（安全语义：先把请求路径剥掉 base_api，再与白名单项比较）：
+#  1. 归一化后与白名单项**精确相等**；
+#  2. 命中目录型项（如 /dev-api/profile/avatar）且位于**路径段边界**（/avatarXxx 不算）。
+#因此 `/evil/login`、`/system/user/login` 这类构造路径不会被放行；
+#不带前缀的历史写法（如裸 `/login`）仍会与 `/dev-api/login` 等价，可继续兼容。
+#推荐按下方写成带 /dev-api 前缀的完整路径，语义最清晰。
 white_list_api:
   - "/"
-  - "/login"
-  - "/logout"
-  - "/captchaImage"
+  - "/dev-api/login"
+  - "/dev-api/logout"
+  - "/dev-api/register"
+  - "/dev-api/captchaImage"
+  - "/dev-api/auth/login"
+  - "/dev-api/auth/logout"
+  - "/dev-api/auth/code"
+  - "/dev-api/auth/register"
+  - "/dev-api/auth/tenant/list"
+  - "/dev-api/resource/sse"
+  - "/dev-api/resource/sse/close"
+  - "/dev-api/profile/avatar"
 #是否启用验证码
 captcha_enabled: true
 #验证码过期时间（分钟）

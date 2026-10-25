@@ -103,6 +103,24 @@ impl SysUserRoleService {
         )
     }
 
+    /// 事务版 [`Self::remove_by_user_id`]：在调用方已开启的事务内删除角色关联。
+    ///
+    /// 用于「删用户 + 删角色关联」这类必须原子的复合写；失败时调用方 `?` 传播，
+    /// 句柄 drop 自动 rollback，不会留下孤儿的角色关联行。
+    pub async fn remove_by_user_id_in_txn(
+        &self,
+        txn: &DatabaseTransaction,
+        user_id: &str,
+    ) -> Result<u64> {
+        Ok(
+            SysUserRoleEntity::delete_many()
+                .filter(SysUserRoleColumn::UserId.eq(user_id.parse::<i64>().unwrap_or(0)))
+                .exec(txn)
+                .await?
+                .rows_affected,
+        )
+    }
+
 
     pub async fn reset_through_user_id(&self, user_id: &str, role_ids: &Vec<String>) -> Result<u64> {
         SysUserRoleEntity::delete_many()
@@ -110,6 +128,48 @@ impl SysUserRoleService {
             .exec(pool!())
             .await?;
         self.add_user_roles(user_id, role_ids).await
+    }
+
+    /// 事务版 [`Self::add_user_roles`]：与「新增用户」同属一个原子操作。
+    pub async fn add_user_roles_in_txn(
+        &self,
+        txn: &DatabaseTransaction,
+        user_id: &str,
+        role_ids: &[String],
+    ) -> Result<u64> {
+        let rows = role_ids
+            .iter()
+            .map(|r_id| SysUserRole {
+                user_id: user_id.parse::<i64>().unwrap_or(0),
+                role_id: r_id.parse::<i64>().unwrap_or(0),
+            })
+            .map(|m| m.into_active_model())
+            .collect::<Vec<_>>();
+        Ok(insert_batch(txn, rows).await?)
+    }
+
+    /// 事务版 [`Self::reset_through_user_id`]：「先删后插」重置角色必须原子。
+    ///
+    /// 旧实现删与插走两条独立连接，中间失败会让用户一旦失去角色（永久丢权限），
+    /// 或半插成功留下不完整的角色集合。
+    pub async fn reset_through_user_id_in_txn(
+        &self,
+        txn: &DatabaseTransaction,
+        user_id: &str,
+        role_ids: &Vec<String>,
+    ) -> Result<u64> {
+        SysUserRoleEntity::delete_many()
+            .filter(SysUserRoleColumn::UserId.eq(user_id.parse::<i64>().unwrap_or(0)))
+            .exec(txn)
+            .await?;
+        let rows = role_ids
+            .iter()
+            .map(|r_id| SysUserRole {
+                user_id: user_id.parse::<i64>().unwrap_or(0),
+                role_id: r_id.parse::<i64>().unwrap_or(0),
+            })
+            .collect::<Vec<_>>();
+        Ok(insert_batch(txn, rows.into_iter().map(|m| m.into_active_model()).collect()).await?)
     }
     pub async fn find_roles_by_user_id(
         &self,

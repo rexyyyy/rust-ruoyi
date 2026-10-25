@@ -112,20 +112,32 @@ impl SysDictDataService {
     }
 
     pub async fn remove(&self, dict_code: &str) -> Result<u64> {
+        use sea_orm::TransactionTrait;
+        // 「删字典数据 + 写回收站」必须原子；快照在事务内读取以保证与删除一致。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let targets = SysDictDataEntity::find()
             .filter(SysDictDataColumn::DictCode.eq(dict_code.parse::<i64>().unwrap_or(0)))
-            .all(pool!())
+            .all(&txn)
             .await?;
 
         let r = SysDictDataEntity::delete_many()
             .filter(SysDictDataColumn::DictCode.eq(dict_code.parse::<i64>().unwrap_or(0)))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if r > 0 {
+            //copy data to trash（与删除同事务：清理/快照失败则整笔回滚）
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_dict_data", &targets)
+                .await?;
+        }
+
+        txn.commit().await.map_err(Error::from)?;
+        // 缓存在提交成功后清理：提交前清理会让其它请求在回滚期间读到脏缓存
+        if r > 0 {
             self.clear_cache().await?;
-            //copy data to trash
-            CONTEXT.sys_trash_service.add("sys_dict_data", &targets).await?;
         }
         Ok(r)
     }

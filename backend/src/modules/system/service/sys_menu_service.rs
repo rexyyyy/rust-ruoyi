@@ -116,6 +116,26 @@ impl SysMenuService {
             .rows_affected)
     }
 
+    /// 事务版 [`Self::remove_batch`]：在调用方已开启的事务内批量删菜单。
+    ///
+    /// 级联删除时「删菜单 + 清角色关联」必须同事务，否则菜单删了却留下
+    /// 指向不存在 menu_id 的孤儿 role_menu 行。本方法**不会**刷新缓存，
+    /// 由调用方在提交成功后统一刷新一次。
+    pub async fn remove_batch_in_txn(
+        &self,
+        txn: &DatabaseTransaction,
+        ids: &[i64],
+    ) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        Ok(SysMenuEntity::delete_many()
+            .filter(SysMenuColumn::MenuId.is_in(ids.to_vec()))
+            .exec(txn)
+            .await?
+            .rows_affected)
+    }
+
     pub async fn get_menu_list_by_user_id(&self, user_id: i64) -> Result<Vec<SysMenuVO>> {
         let sql = "
       select distinct m.menu_id, m.parent_id, m.menu_name, m.path, m.component, m.query_param, m.visible, m.status, coalesce(m.perms,'') as perms, m.is_frame, m.is_cache, m.menu_type, m.icon, m.order_num, m.create_time, m.create_by, m.update_by, m.update_time, m.remark

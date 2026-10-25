@@ -61,13 +61,19 @@ impl SysRoleService {
     }
 
     pub async fn add(&self, role: SysRole, menu_ids: Vec<i64>) -> Result<u64> {
-        let result = insert_model(pool!(), role.clone()).await?;
+        // 「写角色 + 写角色-菜单关联」必须原子：否则会出现「角色建好了但菜单授权丢失」
+        // （或反之）的半成品状态，且该角色已能被分配出去。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+        let result = insert_model(&txn, role.clone()).await?;
 
         if result > 0 && !menu_ids.is_empty() {
             CONTEXT
                 .sys_role_menu_service
-                .add_role_menus(role.role_id, menu_ids).await?;
+                .add_role_menus_in_txn(&txn, role.role_id, menu_ids)
+                .await?;
         }
+        txn.commit().await.map_err(Error::from)?;
+        // 缓存刷新放在提交之后，避免回滚窗口内其它请求读到脏数据
         self.update_cache().await?;
         Ok(result)
     }
@@ -76,9 +82,13 @@ impl SysRoleService {
     /// 否则「状态开关」这类只带 roleId/status 的请求会把 role_name 等非空列写成 NULL（MySQL 报 1048）。
     /// `menu_ids` 为 None 表示本次不处理菜单授权，避免状态开关把已有授权清空。
     pub async fn update(&self, role: SysRole, menu_ids: Option<Vec<i64>>) -> Result<u64> {
+        // 「改角色 + 重置菜单授权」必须原子：旧的 remove + add 分两条连接执行，
+        // 一旦 add 失败，该角色会变成「零授权」，已登录用户会立刻失去对应菜单。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let mut merged = SysRoleEntity::find()
             .filter(SysRoleColumn::RoleId.eq(role.role_id))
-            .one(pool!())
+            .one(&txn)
             .await?
             .ok_or_else(|| Error::from(format!("角色{}不存在！", role.role_id)))?;
 
@@ -93,21 +103,22 @@ impl SysRoleService {
         merged.update_time = role.update_time.or(merged.update_time);
         merged.remark = role.remark.or(merged.remark);
 
-        let result = update_model(pool!(), merged.clone()).await?;
+        let result = update_model(&txn, merged.clone()).await?;
         if result > 0 {
             if let Some(menu_ids) = menu_ids {
                 CONTEXT
                     .sys_role_menu_service
-                    .remove_by_role_id(merged.role_id)
+                    .remove_by_role_id_in_txn(&txn, merged.role_id)
                     .await?;
                 if !menu_ids.is_empty() {
                     CONTEXT
                         .sys_role_menu_service
-                        .add_role_menus(merged.role_id, menu_ids)
+                        .add_role_menus_in_txn(&txn, merged.role_id, menu_ids)
                         .await?;
                 }
             }
         }
+        txn.commit().await.map_err(Error::from)?;
         self.update_cache().await?;
         Ok(result)
     }
@@ -118,18 +129,29 @@ impl SysRoleService {
             .filter(SysRoleColumn::RoleId.eq(role_id))
             .all(pool!())
             .await?;
+
+        // 「删角色 + 删菜单关联 + 写回收站」必须原子：否则中途失败会留下
+        // 孤儿 role_menu 关联行（下次新建角色可能继承到别人的菜单权限）。
+        let txn = pool!().begin().await.map_err(Error::from)?;
+
         let result = SysRoleEntity::delete_many()
             .filter(SysRoleColumn::RoleId.eq(role_id))
-            .exec(pool!())
+            .exec(&txn)
             .await?
             .rows_affected;
         if result > 0 {
             CONTEXT
                 .sys_role_menu_service
-                .remove_by_role_id(role_id)
+                .remove_by_role_id_in_txn(&txn, role_id)
+                .await?;
+            CONTEXT
+                .sys_trash_service
+                .add_in_txn(&txn, "sys_role", &trash)
                 .await?;
         }
-        CONTEXT.sys_trash_service.add("sys_role", &trash).await?;
+
+        txn.commit().await.map_err(Error::from)?;
+        // 缓存同样放到提交之后刷新，避免回滚窗口内其它请求读到脏数据
         self.update_cache().await?;
         Ok(result)
     }

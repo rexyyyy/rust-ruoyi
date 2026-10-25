@@ -9,7 +9,7 @@ use actix_web::{get, post, put, web, Responder, delete};
 use crate::modules::system::domain::{SysRole, SysUserRole, SysRoleEntity, SysRoleColumn, SysRoleDeptEntity, SysRoleDeptColumn, SysRoleDeptActiveModel};
 use crate::modules::system::domain::bo::role::RoleDataScopeDTO;
 use crate::modules::system::domain::bo::role::RoleIdsQueryDTO;
-use sea_orm::{Set, EntityTrait, ColumnTrait, QueryFilter};
+use sea_orm::{Set, EntityTrait, ColumnTrait, QueryFilter, TransactionTrait};
 use crate::modules::system::dao::insert_batch;
 
 #[get("/role/list")]
@@ -115,23 +115,61 @@ pub async fn data_scope(arg: web::Json<RoleDataScopeDTO>) -> impl Responder {
     let role_id = arg.role_id.clone().unwrap_or_default().parse::<i64>().unwrap_or(0);
     let data_scope = arg.data_scope.clone().unwrap_or_else(|| "1".to_string());
     let dept_ids = arg.dept_ids.clone().unwrap_or_default();
-    let _ = SysRoleEntity::update_many()
-        .col_expr(SysRoleColumn::DataScope, sea_orm::sea_query::Expr::value(data_scope))
-        .filter(SysRoleColumn::RoleId.eq(role_id.clone()))
-        .exec(crate::pool!())
-        .await;
-    let _ = SysRoleDeptEntity::delete_many()
-        .filter(SysRoleDeptColumn::RoleId.eq(role_id.clone()))
-        .exec(crate::pool!())
-        .await;
-    let mut rows = vec![];
-    for dept_id in dept_ids {
-        rows.push(SysRoleDeptActiveModel { role_id: Set(role_id), dept_id: Set(dept_id.parse::<i64>().unwrap_or(0)) });
+
+    // 「改 data_scope + 清空旧部门范围 + 写入新部门范围」是一个原子操作。
+    // 旧实现用 `let _ =` 吞掉所有错误，一旦中间步骤失败就会留下
+    // 「角色已切到自定义范围、却还挂着旧部门」这类越权/漏权数据。
+    let txn = match crate::pool!().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("[dataScope] begin txn failed: {e}");
+            return RespVO::from_error_result(500, &Err::<u64, _>(crate::error::Error::from(e)))
+                .resp_json();
+        }
+    };
+
+    let outcome = async {
+        SysRoleEntity::update_many()
+            .col_expr(
+                SysRoleColumn::DataScope,
+                sea_orm::sea_query::Expr::value(data_scope),
+            )
+            .filter(SysRoleColumn::RoleId.eq(role_id))
+            .exec(&txn)
+            .await?;
+        SysRoleDeptEntity::delete_many()
+            .filter(SysRoleDeptColumn::RoleId.eq(role_id))
+            .exec(&txn)
+            .await?;
+        let mut rows = vec![];
+        for dept_id in &dept_ids {
+            rows.push(SysRoleDeptActiveModel {
+                role_id: Set(role_id),
+                dept_id: Set(dept_id.parse::<i64>().unwrap_or(0)),
+            });
+        }
+        if !rows.is_empty() {
+            let _ = insert_batch(&txn, rows).await?;
+        }
+        Ok::<(), crate::error::Error>(())
     }
-    if !rows.is_empty() {
-        let _ = insert_batch(crate::pool!(), rows).await;
+    .await;
+
+    match outcome {
+        Ok(()) => match txn.commit().await {
+            Ok(()) => RespVO::<String>::from_success_info("更新成功！").resp_json(),
+            Err(e) => {
+                log::error!("[dataScope] commit failed: {e}");
+                RespVO::from_error_result(500, &Err::<u64, _>(crate::error::Error::from(e)))
+                    .resp_json()
+            }
+        },
+        Err(e) => {
+            // txn 在此被 drop，sea-orm 自动 rollback
+            log::error!("[dataScope] failed, rolled back: {e}");
+            RespVO::from_error_result(500, &Err::<u64, _>(e)).resp_json()
+        }
     }
-    RespVO::<String>::from_success_info("更新成功！").resp_json()
 }
 
 // 角色下拉框（对应Spring GET /system/role/optionselect）

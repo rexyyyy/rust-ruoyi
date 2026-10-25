@@ -1,5 +1,7 @@
 use std::fs;
+use std::sync::Arc;
 use merge_yaml_hash::{MergeYamlHash};
+use once_cell::sync::OnceCell;
 
 /// serde 默认值：未显式配置时默认走进程内 moka 缓存，零外部依赖即可启动。
 fn default_cache_type() -> String {
@@ -63,8 +65,24 @@ pub struct ApplicationConfig {
     pub cors_allowed_origins: Vec<String>
 }
 
-impl Default for ApplicationConfig {
-    fn default() -> Self {
+/// 进程级唯一的 configs 实例（所有消费方共享同一个 `Arc`）。
+///
+/// **收敛背景**：历史上存在两条配置源 —— `ServiceContext::default()` 自行
+/// `ApplicationConfig::default()` 加载一份，`AppState` 再 `clone()` 一份，
+/// 于是同一份配置在进程内存里有两个互不同步的实例（改一边另一边看不到）。
+/// 收敛后 `ServiceContext.config` 与 `AppState.config` 指向同一个 `Arc`，
+/// 配置数据全进程有且只有一份。
+static GLOBAL_CONFIG: OnceCell<Arc<ApplicationConfig>> = OnceCell::new();
+
+/// 取全局配置单例。首次调用时加载 `application.yml` 并叠加 `application-{profile}.yml`。
+pub fn global() -> &'static Arc<ApplicationConfig> {
+    GLOBAL_CONFIG.get_or_init(|| Arc::new(ApplicationConfig::load()))
+}
+
+impl ApplicationConfig {
+    /// 真正的文件加载逻辑，**只应由 [`global`] 调用**。
+    /// 外部需要配置请走 `ApplicationConfig::default()` 或 [`global`]，避免产生第二份实例。
+    fn load() -> Self {
 
         let k = "profile=";
         let profile = std::env::args_os()
@@ -116,6 +134,16 @@ impl Default for ApplicationConfig {
             println!("[ruoyi_rust] ///////////////////// Start On Release Mode ////////////////////////////");
         }
         result
+    }
+}
+
+impl Default for ApplicationConfig {
+    /// 返回全局单例的数据副本。
+    ///
+    /// 底层数据始终来自 [`global`] 这一份，因此进程内任意多处调用
+    /// `ApplicationConfig::default()` 都保持一致，不会再出现「两份不同步的配置」。
+    fn default() -> Self {
+        global().as_ref().clone()
     }
 }
 
