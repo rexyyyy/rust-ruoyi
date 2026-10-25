@@ -15,6 +15,7 @@ database_url: "mysql://root:123456@127.0.0.1:3306/ruoyirust"
 
 
 # 是否启用登录验证码（true 时登录必须带 code+uuid，验证码存 redis 前缀 login_captcha）
+# 注：跑 backend 的工作流冒烟脚本时需临时改为 false（脚本不带验证码）
 captcha_enabled: true
 
 #接口白名单（免登陆直接访问）

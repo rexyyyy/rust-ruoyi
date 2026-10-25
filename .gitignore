@@ -39,3 +39,8 @@ e2e_*.png
 .DS_Store
 Thumbs.db
 /backend/Cargo.lock
+/warm-flow/Cargo.lock
+
+# ================= 本机临时笔记（磁盘扫描清单，与工程无关） =================
+/软件开发项目清单.md
+/E盘软件开发项目清单.md
