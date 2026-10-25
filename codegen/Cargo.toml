@@ -20,6 +20,8 @@ path = "src/main.rs"
 default = ["mysql"]
 mysql = ["sea-orm/sqlx-mysql"]
 postgres = ["sea-orm/sqlx-postgres"]
+# 与 backend 的 feature 名保持一致，避免两处命名不同踩坑（等价于 postgres）
+postgresql = ["postgres"]
 
 [dependencies]
 # —— 与 backend 保持同一套 ORM 与运行时，避免「生成的东西和主项目不是一套」——

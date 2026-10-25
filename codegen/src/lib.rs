@@ -8,6 +8,11 @@
 //! 因此这里刻意不引入任何 actix-web 依赖，也不感知 gen_table 表结构，
 //! 便于单独用命令行跑（`codegen-cli`）或在测试里直接调用。
 
+// 驱动 feature 保护：本 crate 必须启用一个数据库驱动，否则 sqlx 运行时只会报
+// “has no supporting driver”，很难定位。这里在编译期直接给出可读提示。
+#[cfg(not(any(feature = "mysql", feature = "postgres")))]
+compile_error!("codegen 需要启用数据库驱动 feature：mysql（默认）或 postgres");
+
 pub mod db;
 pub mod error;
 pub mod gen;

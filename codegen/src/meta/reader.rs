@@ -12,22 +12,18 @@
 //!    `character_maximum_length` / `numeric_precision` 都是 `bigint unsigned`，
 //!    按 `i32` 解码会类型不匹配，故 MySQL 分支先取 `i64` 再收窄。
 
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
+use sea_orm::ConnectionTrait;
 
 use super::column::{ColumnMeta, DbTableRow, TableMeta};
+use crate::db::{is_mysql, stmt};
 use crate::error::Result;
 use crate::pool;
 
 /// PostgreSQL 默认 schema；MySQL 下该常量会被忽略（改为当前库 `DATABASE()`）
 pub const DEFAULT_SCHEMA: &str = "public";
 
-/// 当前连接的真实后端，决定走 PG 系统表还是 MySQL information_schema 分支
-fn backend() -> DbBackend {
-    pool!().get_database_backend()
-}
-
 /// MySQL 分支的 schema 入参：调用方传的是 PG 风格 `public` 时折算为 NULL，
-/// 交给 SQL 里的 `COALESCE(?, DATABASE())` 兜底成当前库。
+/// 交给 SQL 里的 `COALESCE($1, DATABASE())` 兜底成当前库。
 fn mysql_schema_arg(schema: &str) -> Option<String> {
     if schema.is_empty() || schema.eq_ignore_ascii_case("public") {
         None
@@ -38,22 +34,17 @@ fn mysql_schema_arg(schema: &str) -> Option<String> {
 
 /// 列出可导入的物理表（已纳入 gen_table 的表由上层过滤）
 pub async fn list_tables(schema: &str) -> Result<Vec<DbTableRow>> {
-    let backend = backend();
-    let rows = if backend == DbBackend::MySql {
+    let rows = if is_mysql() {
         let sql = r#"
             SELECT t.table_name                       AS table_name,
                    COALESCE(t.table_comment, '')       AS table_comment
             FROM information_schema.tables t
-            WHERE t.table_schema = COALESCE(?, DATABASE())
+            WHERE t.table_schema = COALESCE($1, DATABASE())
               AND t.table_type = 'BASE TABLE'
             ORDER BY t.table_name
         "#;
         pool!()
-            .query_all(Statement::from_sql_and_values(
-                backend,
-                sql,
-                vec![mysql_schema_arg(schema).into()],
-            ))
+            .query_all(stmt(sql, vec![mysql_schema_arg(schema).into()]))
             .await?
     } else {
         let sql = r#"
@@ -66,13 +57,7 @@ pub async fn list_tables(schema: &str) -> Result<Vec<DbTableRow>> {
             WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
             ORDER BY t.table_name
         "#;
-        pool!()
-            .query_all(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                sql,
-                vec![schema.into()],
-            ))
-            .await?
+        pool!().query_all(stmt(sql, vec![schema.into()])).await?
     };
 
     let mut out = Vec::with_capacity(rows.len());
@@ -99,8 +84,7 @@ pub async fn load_table(schema: &str, table_name: &str) -> Result<TableMeta> {
 
 /// 只取列定义（同步数据库结构时会用到）
 pub async fn load_columns(schema: &str, table_name: &str) -> Result<Vec<ColumnMeta>> {
-    let backend = backend();
-    if backend == DbBackend::MySql {
+    if is_mysql() {
         return load_columns_mysql(schema, table_name).await;
     }
     let sql = r#"
@@ -129,11 +113,7 @@ pub async fn load_columns(schema: &str, table_name: &str) -> Result<Vec<ColumnMe
         ORDER BY c.ordinal_position
     "#;
     let rows = pool!()
-        .query_all(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            sql,
-            vec![schema.into(), table_name.into()],
-        ))
+        .query_all(stmt(sql, vec![schema.into(), table_name.into()]))
         .await?;
 
     if rows.is_empty() {
@@ -181,12 +161,11 @@ async fn load_columns_mysql(schema: &str, table_name: &str) -> Result<Vec<Column
                CASE WHEN c.column_key = 'PRI' THEN '1' ELSE '0' END AS is_pk,
                CASE WHEN c.extra LIKE '%auto_increment%' THEN '1' ELSE '0' END AS is_increment
         FROM information_schema.columns c
-        WHERE c.table_schema = COALESCE(?, DATABASE()) AND c.table_name = ?
+        WHERE c.table_schema = COALESCE($1, DATABASE()) AND c.table_name = $2
         ORDER BY c.ordinal_position
     "#;
     let rows = pool!()
-        .query_all(Statement::from_sql_and_values(
-            DbBackend::MySql,
+        .query_all(stmt(
             sql,
             vec![mysql_schema_arg(schema).into(), table_name.into()],
         ))
@@ -220,17 +199,15 @@ async fn load_columns_mysql(schema: &str, table_name: &str) -> Result<Vec<Column
 }
 
 async fn load_table_comment(schema: &str, table_name: &str) -> Result<String> {
-    let backend = backend();
-    let rows = if backend == DbBackend::MySql {
+    let rows = if is_mysql() {
         let sql = r#"
             SELECT COALESCE(t.table_comment, '') AS table_comment
             FROM information_schema.tables t
-            WHERE t.table_schema = COALESCE(?, DATABASE()) AND t.table_name = ?
+            WHERE t.table_schema = COALESCE($1, DATABASE()) AND t.table_name = $2
             LIMIT 1
         "#;
         pool!()
-            .query_all(Statement::from_sql_and_values(
-                backend,
+            .query_all(stmt(
                 sql,
                 vec![mysql_schema_arg(schema).into(), table_name.into()],
             ))
@@ -246,11 +223,7 @@ async fn load_table_comment(schema: &str, table_name: &str) -> Result<String> {
             LIMIT 1
         "#;
         pool!()
-            .query_all(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                sql,
-                vec![schema.into(), table_name.into()],
-            ))
+            .query_all(stmt(sql, vec![schema.into(), table_name.into()]))
             .await?
     };
     Ok(match rows.into_iter().next() {
