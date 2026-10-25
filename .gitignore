@@ -44,3 +44,10 @@ Thumbs.db
 # ================= 本机临时笔记（磁盘扫描清单，与工程无关） =================
 /软件开发项目清单.md
 /E盘软件开发项目清单.md
+/e2e_leave2_gateway.ps1
+/build_backend.ps1
+/build_backend.sh
+/回归测试报告.md
+/RuoYi-Rust-后端接口对齐报告.md
+/smoke_mysql.ps1
+/smoke_workflow.ps1
