@@ -133,7 +133,8 @@ impl<T> ToString for RespVO<T>
         T: Serialize + DeserializeOwned + Clone,
 {
     fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        // 统一走时间序列化出口，把 chrono 的 ISO 时间规整成前端约定的格式
+        crate::util::datetime::to_json_string(self)
     }
 }
 
@@ -182,7 +183,7 @@ impl RespJson
 impl ToString for RespJson
 {
     fn to_string(&self) -> String {
-        serde_json::to_string(&self.inner).unwrap()
+        crate::util::datetime::to_json_string(&self.inner)
     }
 }
 
@@ -251,7 +252,8 @@ impl<T> ToString for PageVO<T>
         T: Serialize + DeserializeOwned + Clone,
 {
     fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        // 统一走时间序列化出口，把 chrono 的 ISO 时间规整成前端约定的格式
+        crate::util::datetime::to_json_string(self)
     }
 }
 pub mod sys_operlog;
