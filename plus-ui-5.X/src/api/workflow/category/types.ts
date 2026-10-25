@@ -1,67 +1,40 @@
-export interface CategoryTreeVO {
-  id: number | string;
-  label: string;
-  parentId: number | string;
-  weight: number;
-  children: CategoryTreeVO[];
-}
+/**
+ * 流程分类 视图对象
+ */
 export interface CategoryVO {
-  /**
-   * 流程分类ID
-   */
-  categoryId: string | number;
-
-  /**
-   * 父级id
-   */
-  parentId: string | number;
-
-  /**
-   * 流程分类名称
-   */
+  categoryId: string;
+  parentId: string;
+  ancestors?: string;
   categoryName: string;
-
-  /**
-   * 显示顺序
-   */
-  orderNum: number;
-
-  /**
-   * 创建时间
-   */
-  createTime: string;
-
-  /**
-   * 子对象
-   */
-  children: CategoryVO[];
+  orderNum?: number;
+  createTime?: string;
+  children?: CategoryVO[];
 }
 
-export interface CategoryForm extends BaseEntity {
-  /**
-   * 流程分类ID
-   */
+/**
+ * 流程分类 表单（新增 / 修改共用）
+ */
+export interface CategoryForm {
   categoryId?: string | number;
-
-  /**
-   * 流程分类名称
-   */
-  categoryName?: string;
-
-  /**
-   * 父流程分类id
-   */
   parentId?: string | number;
-
-  /**
-   * 显示顺序
-   */
+  categoryName?: string;
   orderNum?: number;
 }
 
+/**
+ * 流程分类 查询参数
+ */
 export interface CategoryQuery {
-  /**
-   * 流程分类名称
-   */
   categoryName?: string;
+}
+
+/**
+ * 下拉树节点（后端 Tree 结构）
+ */
+export interface CategoryTreeVO {
+  id: string;
+  name?: string;
+  label?: string;
+  value?: string;
+  children?: CategoryTreeVO[];
 }

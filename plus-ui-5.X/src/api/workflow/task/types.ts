@@ -1,60 +1,114 @@
-export interface TaskQuery extends PageQuery {
-  nodeName?: string;
-  flowCode?: string;
-  flowName?: string;
-  createByIds?: string[] | number[];
-}
-
-export interface ParticipantVo {
-  groupIds?: string[] | number[];
-  candidate: string[] | number[];
-  candidateName: string[];
-  claim: boolean;
-}
+/**
+ * 待办任务 视图对象
+ */
 export interface FlowTaskVO {
-  id: string | number;
-  createTime?: Date;
-  updateTime?: Date;
-  tenantId?: string;
-  definitionId?: string;
+  id: string;
   instanceId: string;
-  flowName: string;
-  businessId: string;
+  definitionId: string;
+  flowName?: string;
+  flowCode?: string;
+  businessId?: string;
   nodeCode: string;
-  nodeName: string;
-  flowCode: string;
-  flowStatus: string;
-  formCustom: string;
-  formPath: string;
+  nodeName?: string;
+  /** 0 开始 1 中间 2 结束 3 互斥 4 并行 5 包容 */
   nodeType: number;
-  nodeRatio: string | number;
-  version?: string;
-  applyNode?: boolean;
-  buttonList?: ButtonList[];
-  copyList?: FlowCopyVo[];
-  varList?: Map<string, string>;
-  businessCode: string;
-  businessTitle: string;
+  flowStatus: string;
+  formCustom?: string;
+  formPath?: string;
+  createBy?: string;
+  createTime?: string;
 }
 
-export interface ButtonList {
-  code: string;
-  show: boolean;
-}
-export interface FlowCopyVo {
-  userId: string | number;
-  nickName: string;
+/**
+ * 已办任务（历史记录）视图对象
+ */
+export interface FlowHisTaskVO {
+  id: string;
+  definitionId: string;
+  instanceId: string;
+  flowName?: string;
+  businessId?: string;
+  nodeCode?: string;
+  nodeName?: string;
+  targetNodeCode?: string;
+  targetNodeName?: string;
+  approver?: string;
+  /** 办理人昵称（后端按 approver 的用户 id 反查 sys_user 补齐） */
+  approverName?: string;
+  /** 1 审批 2 转办 3 委派 4 会签 5 票签 6 加签 7 减签 */
+  cooperateType: number;
+  /** PASS / REJECT / NONE */
+  skipType: string;
+  flowStatus: string;
+  message?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
-export interface TaskOperationBo {
-  //委派/转办人的用户ID（必填，准对委派/转办人操作）
-  userId?: string;
-  //加签/减签人的用户ID列表（必填，针对加签/减签操作）
-  userIds?: string[];
-  //任务ID（必填）
+/**
+ * 待办 / 已办 查询参数
+ */
+export interface FlowTaskQuery extends PageQuery {
+  nodeCode?: string;
+  flowStatus?: string;
+  businessId?: string;
+  flowCode?: string;
+}
+
+/**
+ * 发起流程入参
+ */
+export interface StartProcessBo {
+  flowCode?: string;
+  businessId?: string;
+  variables?: Record<string, any>;
+}
+
+/**
+ * 发起流程返回
+ */
+export interface StartReturnVO {
+  processInstanceId: string;
+  taskId?: string;
+  businessCode?: string;
+}
+
+/**
+ * 办理任务入参
+ */
+export interface CompleteTaskBo {
   taskId: string | number;
-  //消息类型
-  messageType?: string[];
-  //意见或备注信息（可选）
+  /** PASS 通过 / REJECT 退回 */
+  skipType?: string;
+  message?: string;
+  /** 退回 / 跳转的目标节点编码 */
+  nodeCode?: string;
+  variables?: Record<string, any>;
+  /** 指定下一节点办理人（用户 id 字符串） */
+  nextHandlers?: string[];
+}
+
+/**
+ * 终止流程入参
+ */
+export interface TerminationBo {
+  taskId: string | number;
+  message?: string;
+}
+
+/**
+ * 撤销流程入参
+ */
+export interface RevokeBo {
+  instanceId: string | number;
+  message?: string;
+}
+
+/**
+ * 任务操作入参（转办 / 委派 / 加签 / 减签）
+ */
+export interface TaskOperationBo {
+  taskId: string | number;
+  handlerIds: string[];
   message?: string;
 }

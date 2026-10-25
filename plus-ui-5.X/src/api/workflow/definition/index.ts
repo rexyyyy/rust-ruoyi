@@ -1,170 +1,126 @@
 import request from '@/utils/request';
-import { FlowDefinitionQuery, definitionXmlVO, FlowDefinitionForm, FlowDefinitionVo } from '@/api/workflow/definition/types';
 import { AxiosPromise } from 'axios';
+import { DesignJson, FlowDefinitionQuery, FlowDefinitionVO } from '@/api/workflow/definition/types';
 
 /**
- * 获取流程定义列表
- * @param query 流程实例id
- * @returns
+ * 流程定义分页
  */
-export const listDefinition = (query: FlowDefinitionQuery): AxiosPromise<FlowDefinitionVo[]> => {
+export const listDefinition = (query?: FlowDefinitionQuery): AxiosPromise<FlowDefinitionVO[]> => {
   return request({
-    url: `/workflow/definition/list`,
+    url: '/workflow/definition/list',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 查询未发布的流程定义列表
- * @param query 流程实例id
- * @returns
+ * 已发布的流程定义（发起流程时选择）
  */
-export const unPublishList = (query: FlowDefinitionQuery): AxiosPromise<FlowDefinitionVo[]> => {
+export const publishedList = (): AxiosPromise<FlowDefinitionVO[]> => {
   return request({
-    url: `/workflow/definition/unPublishList`,
+    url: '/workflow/definition/publishedList',
+    method: 'get'
+  });
+};
+
+/**
+ * 流程定义详情
+ */
+export const getDefinition = (id: string | number): AxiosPromise<FlowDefinitionVO> => {
+  return request({
+    url: '/workflow/definition/' + id,
+    method: 'get'
+  });
+};
+
+/**
+ * 设计器数据：不传 id 返回新建壳子
+ */
+export const getDesign = (id?: string | number): AxiosPromise<DesignJson> => {
+  return request({
+    url: '/workflow/definition/design',
     method: 'get',
-    params: query
+    params: { id }
   });
 };
 
 /**
- * 通过流程定义id获取xml
- * @param definitionId 流程定义id
- * @returns
+ * 保存设计器数据，返回带真实 id 的流程定义
  */
-export const definitionXml = (definitionId: string): AxiosPromise<definitionXmlVO> => {
+export const saveDesign = (data: DesignJson, onlyNodeSkip = false): AxiosPromise<FlowDefinitionVO> => {
   return request({
-    url: `/workflow/definition/definitionXml/${definitionId}`,
-    method: 'get'
-  });
-};
-
-/**
- * 删除流程定义
- * @param id 流程定义id
- * @returns
- */
-export const deleteDefinition = (id: string | string[]) => {
-  return request({
-    url: `/workflow/definition/${id}`,
-    method: 'delete'
-  });
-};
-
-/**
- * 挂起/激活
- * @param definitionId 流程定义id
- * @param activityStatus 状态
- * @returns
- */
-export const active = (definitionId: string, activityStatus: boolean) => {
-  return request({
-    url: `/workflow/definition/active/${definitionId}`,
-    method: 'put',
-    params: {
-      active: activityStatus
-    }
-  });
-};
-
-/**
- * 通过zip或xml部署流程定义
- * @returns
- */
-export function importDef(data: any) {
-  return request({
-    url: '/workflow/definition/importDef',
+    url: '/workflow/definition/design',
     method: 'post',
-    data: data,
-    headers: {
-      repeatSubmit: false
-    }
-  });
-}
-
-/**
- * 发布流程定义
- * @param id 流程定义id
- * @returns
- */
-export const publish = (id: string) => {
-  return request({
-    url: `/workflow/definition/publish/${id}`,
-    method: 'put'
-  });
-};
-
-/**
- * 取消发布流程定义
- * @param id 流程定义id
- * @returns
- */
-export const unPublish = (id: string) => {
-  return request({
-    url: `/workflow/definition/unPublish/${id}`,
-    method: 'put'
-  });
-};
-
-/**
- * 获取流程定义xml字符串
- * @param id 流程定义id
- * @returns
- */
-export const xmlString = (id: string) => {
-  return request({
-    url: `/workflow/definition/xmlString/${id}`,
-    method: 'get'
-  });
-};
-
-/**
- * 新增
- * @param data 参数
- * @returns
- */
-export const add = (data: FlowDefinitionForm) => {
-  return request({
-    url: `/workflow/definition`,
-    method: 'post',
+    params: { onlyNodeSkip },
     data: data
   });
 };
 
 /**
- * 修改
- * @param data 参数
- * @returns
+ * 导入流程定义 JSON（总是生成新版本）
  */
-export const edit = (data: FlowDefinitionForm) => {
+export const importDefinition = (json: string): AxiosPromise<FlowDefinitionVO> => {
   return request({
-    url: `/workflow/definition`,
-    method: 'put',
-    data: data
+    url: '/workflow/definition/import',
+    method: 'post',
+    data: { json }
   });
 };
 
 /**
- * 查询详情
- * @param id 参数
- * @returns
+ * 导出流程定义 JSON（后端直接返回 DefJson，前端转成文件下载）
  */
-export const getInfo = (id: number | string) => {
+export const exportDefinition = (id: string | number): AxiosPromise<DesignJson> => {
   return request({
-    url: `/workflow/definition/${id}`,
+    url: '/workflow/definition/export/' + id,
     method: 'get'
   });
 };
 
-/**
- * 复制流程定义
- * @param id 流程定义id
- * @returns
- */
-export const copy = (id: string) => {
+/** 发布 */
+export const publishDefinition = (id: string | number) => {
   return request({
-    url: `/workflow/definition/copy/${id}`,
+    url: '/workflow/definition/publish/' + id,
+    method: 'put'
+  });
+};
+
+/** 取消发布 */
+export const unPublishDefinition = (id: string | number) => {
+  return request({
+    url: '/workflow/definition/unPublish/' + id,
+    method: 'put'
+  });
+};
+
+/** 激活 */
+export const activeDefinition = (id: string | number) => {
+  return request({
+    url: '/workflow/definition/active/' + id,
+    method: 'put'
+  });
+};
+
+/** 挂起 */
+export const unActiveDefinition = (id: string | number) => {
+  return request({
+    url: '/workflow/definition/unActive/' + id,
+    method: 'put'
+  });
+};
+
+/** 复制为新版本 */
+export const copyDefinition = (id: string | number) => {
+  return request({
+    url: '/workflow/definition/copy/' + id,
     method: 'post'
+  });
+};
+
+/** 删除流程定义（多个用逗号分隔） */
+export const delDefinition = (ids: string | number | Array<string | number>) => {
+  return request({
+    url: '/workflow/definition/' + ids,
+    method: 'delete'
   });
 };

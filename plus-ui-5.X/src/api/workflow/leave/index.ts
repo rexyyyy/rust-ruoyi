@@ -1,13 +1,11 @@
 import request from '@/utils/request';
 import { AxiosPromise } from 'axios';
-import { LeaveVO, LeaveQuery, LeaveForm } from '@/api/workflow/leave/types';
+import { LeaveForm, LeaveQuery, LeaveVO } from '@/api/workflow/leave/types';
+import { StartReturnVO } from '@/api/workflow/task/types';
 
 /**
- * 查询请假列表
- * @param query
- * @returns {*}
+ * 请假单分页
  */
-
 export const listLeave = (query?: LeaveQuery): AxiosPromise<LeaveVO[]> => {
   return request({
     url: '/workflow/leave/list',
@@ -17,8 +15,7 @@ export const listLeave = (query?: LeaveQuery): AxiosPromise<LeaveVO[]> => {
 };
 
 /**
- * 查询请假详细
- * @param id
+ * 请假单详情
  */
 export const getLeave = (id: string | number): AxiosPromise<LeaveVO> => {
   return request({
@@ -28,10 +25,9 @@ export const getLeave = (id: string | number): AxiosPromise<LeaveVO> => {
 };
 
 /**
- * 新增请假
- * @param data
+ * 新增请假单（草稿），返回主键字符串
  */
-export const addLeave = (data: LeaveForm): AxiosPromise<LeaveVO> => {
+export const addLeave = (data: LeaveForm): AxiosPromise<string> => {
   return request({
     url: '/workflow/leave',
     method: 'post',
@@ -40,22 +36,9 @@ export const addLeave = (data: LeaveForm): AxiosPromise<LeaveVO> => {
 };
 
 /**
- * 提交请假并发起流程
- * @param data
+ * 修改请假单
  */
-export const submitAndFlowStart = (data: LeaveForm): AxiosPromise<LeaveVO> => {
-  return request({
-    url: '/workflow/leave/submitAndFlowStart',
-    method: 'post',
-    data: data
-  });
-};
-
-/**
- * 修改请假
- * @param data
- */
-export const updateLeave = (data: LeaveForm): AxiosPromise<LeaveVO> => {
+export const updateLeave = (data: LeaveForm) => {
   return request({
     url: '/workflow/leave',
     method: 'put',
@@ -64,12 +47,32 @@ export const updateLeave = (data: LeaveForm): AxiosPromise<LeaveVO> => {
 };
 
 /**
- * 删除请假
- * @param id
+ * 保存并提交审批（一步发起流程）
  */
-export const delLeave = (id: string | number | Array<string | number>) => {
+export const submitLeave = (data: LeaveForm): AxiosPromise<StartReturnVO> => {
   return request({
-    url: '/workflow/leave/' + id,
+    url: '/workflow/leave/submit',
+    method: 'post',
+    data: data
+  });
+};
+
+/**
+ * 按业务主键取请假单（待办详情页渲染业务表单）
+ */
+export const leaveByBusinessId = (businessId: string | number): AxiosPromise<LeaveVO> => {
+  return request({
+    url: '/workflow/instance/leave/' + businessId,
+    method: 'get'
+  });
+};
+
+/**
+ * 删除请假单（多个用逗号分隔）
+ */
+export const delLeave = (ids: string | number | Array<string | number>) => {
+  return request({
+    url: '/workflow/leave/' + ids,
     method: 'delete'
   });
 };

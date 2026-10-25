@@ -1,78 +1,65 @@
 import request from '@/utils/request';
 import { AxiosPromise } from 'axios';
-import { TaskQuery, FlowTaskVO, TaskOperationBo } from '@/api/workflow/task/types';
+import {
+  CompleteTaskBo,
+  FlowHisTaskVO,
+  FlowTaskQuery,
+  FlowTaskVO,
+  RevokeBo,
+  StartProcessBo,
+  StartReturnVO,
+  TaskOperationBo,
+  TerminationBo
+} from '@/api/workflow/task/types';
 
 /**
- * 查询待办列表
- * @param query
- * @returns {*}
+ * 我的待办
  */
-export const pageByTaskWait = (query: TaskQuery): AxiosPromise<FlowTaskVO[]> => {
+export const listTodo = (query?: FlowTaskQuery): AxiosPromise<FlowTaskVO[]> => {
   return request({
-    url: '/workflow/task/pageByTaskWait',
+    url: '/workflow/task/todoList',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 查询已办列表
- * @param query
- * @returns {*}
+ * 我的已办
  */
-export const pageByTaskFinish = (query: TaskQuery): AxiosPromise<FlowTaskVO[]> => {
+export const listDone = (query?: FlowTaskQuery): AxiosPromise<FlowHisTaskVO[]> => {
   return request({
-    url: '/workflow/task/pageByTaskFinish',
+    url: '/workflow/task/doneList',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 查询当前用户的抄送列表
- * @param query
- * @returns {*}
+ * 全部待办（管理员视角）
  */
-export const pageByTaskCopy = (query: TaskQuery): AxiosPromise<FlowTaskVO[]> => {
+export const listAllTodo = (query?: FlowTaskQuery): AxiosPromise<FlowTaskVO[]> => {
   return request({
-    url: '/workflow/task/pageByTaskCopy',
+    url: '/workflow/task/allTodoList',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 当前租户所有待办任务
- * @param query
- * @returns {*}
+ * 全部已办（管理员视角）
  */
-export const pageByAllTaskWait = (query: TaskQuery): AxiosPromise<FlowTaskVO[]> => {
+export const listAllDone = (query?: FlowTaskQuery): AxiosPromise<FlowHisTaskVO[]> => {
   return request({
-    url: '/workflow/task/pageByAllTaskWait',
+    url: '/workflow/task/allDoneList',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 当前租户所有已办任务
- * @param query
- * @returns {*}
+ * 发起流程
  */
-export const pageByAllTaskFinish = (query: TaskQuery): AxiosPromise<FlowTaskVO[]> => {
-  return request({
-    url: '/workflow/task/pageByAllTaskFinish',
-    method: 'get',
-    params: query
-  });
-};
-
-/**
- * 启动流程
- * @param data
- * @returns {*}
- */
-export const startWorkFlow = (data: object): any => {
+export const startWorkFlow = (data: StartProcessBo): AxiosPromise<StartReturnVO> => {
   return request({
     url: '/workflow/task/startWorkFlow',
     method: 'post',
@@ -81,11 +68,9 @@ export const startWorkFlow = (data: object): any => {
 };
 
 /**
- * 办理流程
- * @param data
- * @returns {*}
+ * 办理任务（通过 / 退回）
  */
-export const completeTask = (data: object) => {
+export const completeTask = (data: CompleteTaskBo) => {
   return request({
     url: '/workflow/task/completeTask',
     method: 'post',
@@ -94,113 +79,66 @@ export const completeTask = (data: object) => {
 };
 
 /**
- * 任务驳回
- * @param data
- * @returns {*}
+ * 终止流程
  */
-export const backProcess = (data: any): any => {
+export const terminationTask = (data: TerminationBo) => {
   return request({
-    url: '/workflow/task/backProcess',
+    url: '/workflow/task/terminationTask',
     method: 'post',
     data: data
   });
 };
 
 /**
- * 获取当前任务
- * @param taskId
- * @returns
+ * 撤销流程（发起人撤回）
  */
-export const getTask = (taskId: string) => {
+export const revokeProcess = (data: RevokeBo) => {
   return request({
-    url: '/workflow/task/getTask/' + taskId,
+    url: '/workflow/task/revokeProcess',
+    method: 'post',
+    data: data
+  });
+};
+
+/**
+ * 转办 / 委派 / 加签 / 减签
+ *
+ * op：transfer | depute | addSignature | reductionSignature
+ */
+export const taskOperation = (op: string, data: TaskOperationBo) => {
+  return request({
+    url: '/workflow/task/taskOperation/' + op,
+    method: 'post',
+    data: data
+  });
+};
+
+/**
+ * 取回已办任务
+ */
+export const taskBack = (taskId: string | number) => {
+  return request({
+    url: '/workflow/task/taskBack/' + taskId,
+    method: 'post'
+  });
+};
+
+/**
+ * 实例的办理历史（详情页时间线）
+ */
+export const flowHisTaskList = (instanceId: string | number): AxiosPromise<FlowHisTaskVO[]> => {
+  return request({
+    url: '/workflow/task/flowHisTaskList/' + instanceId,
     method: 'get'
   });
 };
 
 /**
- * 修改任务办理人
- * @param taskIdList
- * @param userId
- * @returns
+ * 任务的办理人（用户 id 列表）
  */
-export const updateAssignee = (taskIdList: Array<string>, userId: string) => {
+export const taskUserList = (taskId: string | number): AxiosPromise<string[]> => {
   return request({
-    url: `/workflow/task/updateAssignee/${userId}`,
-    method: 'put',
-    data: taskIdList
-  });
-};
-
-/**
- * 终止任务
- * @returns
- */
-export const terminationTask = (data: any) => {
-  return request({
-    url: `/workflow/task/terminationTask`,
-    method: 'post',
-    data: data
-  });
-};
-
-/**
- * 获取可驳回得任务节点
- * @returns
- */
-export const getBackTaskNode = (taskId: string | number, nodeCode: string) => {
-  return request({
-    url: `/workflow/task/getBackTaskNode/${taskId}/${nodeCode}`,
+    url: '/workflow/task/taskUserList/' + taskId,
     method: 'get'
-  });
-};
-
-/**
- * 任务操作 操作类型，委派 delegateTask、转办 transferTask、加签 addSignature、减签 reductionSignature
- * @returns
- */
-export const taskOperation = (data: TaskOperationBo, operation: string) => {
-  return request({
-    url: `/workflow/task/taskOperation/${operation}`,
-    method: 'post',
-    data: data
-  });
-};
-
-/**
- * 获取当前任务办理人
- * @param taskId 任务id
- * @returns
- */
-export const currentTaskAllUser = (taskId: string | number) => {
-  return request({
-    url: `/workflow/task/currentTaskAllUser/${taskId}`,
-    method: 'get'
-  });
-};
-
-/**
- * 获取下一节点写
- * @param data参数
- * @returns
- */
-export const getNextNodeList = (data: any): any => {
-  return request({
-    url: '/workflow/task/getNextNodeList',
-    method: 'post',
-    data: data
-  });
-};
-
-/**
- * 催办任务
- * @param data参数
- * @returns
- */
-export const urgeTask = (data: any): any => {
-  return request({
-    url: '/workflow/task/urgeTask',
-    method: 'post',
-    data: data
   });
 };

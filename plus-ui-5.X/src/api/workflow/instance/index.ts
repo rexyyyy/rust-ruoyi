@@ -1,125 +1,79 @@
 import request from '@/utils/request';
-import { FlowInstanceQuery, FlowInstanceVO } from '@/api/workflow/instance/types';
 import { AxiosPromise } from 'axios';
+import { FlowInstanceQuery, FlowInstanceVO } from '@/api/workflow/instance/types';
+import { DesignJson } from '@/api/workflow/definition/types';
 
 /**
- * 查询运行中实例列表
- * @param query
- * @returns {*}
+ * 流程实例分页
  */
-export const pageByRunning = (query: FlowInstanceQuery): AxiosPromise<FlowInstanceVO[]> => {
+export const listInstance = (query?: FlowInstanceQuery): AxiosPromise<FlowInstanceVO[]> => {
   return request({
-    url: '/workflow/instance/pageByRunning',
+    url: '/workflow/instance/list',
     method: 'get',
     params: query
   });
 };
 
 /**
- * 查询已完成实例列表
- * @param query
- * @returns {*}
+ * 流程实例详情
  */
-export const pageByFinish = (query: FlowInstanceQuery): AxiosPromise<FlowInstanceVO[]> => {
+export const getInstance = (id: string | number): AxiosPromise<FlowInstanceVO> => {
   return request({
-    url: '/workflow/instance/pageByFinish',
-    method: 'get',
-    params: query
-  });
-};
-
-/**
- * 通过业务id获取历史流程图
- */
-export const flowHisTaskList = (businessId: string | number) => {
-  return request({
-    url: `/workflow/instance/flowHisTaskList/${businessId}` + '?t' + Math.random(),
+    url: '/workflow/instance/' + id,
     method: 'get'
   });
 };
 
 /**
- * 分页查询当前登录人单据
- * @param query
- * @returns {*}
+ * 流程图（节点与连线带办理状态，用于轨迹查看）
  */
-export const pageByCurrent = (query: FlowInstanceQuery): AxiosPromise<FlowInstanceVO[]> => {
+export const flowChart = (id: string | number): AxiosPromise<DesignJson> => {
   return request({
-    url: '/workflow/instance/pageByCurrent',
-    method: 'get',
-    params: query
-  });
-};
-
-/**
- * 撤销流程
- * @param data 参数
- * @returns
- */
-export const cancelProcessApply = (data: any) => {
-  return request({
-    url: `/workflow/instance/cancelProcessApply`,
-    method: 'put',
-    data: data
-  });
-};
-
-/**
- * 获取流程变量
- * @param instanceId 实例id
- * @returns
- */
-export const instanceVariable = (instanceId: string | number) => {
-  return request({
-    url: `/workflow/instance/instanceVariable/${instanceId}`,
+    url: '/workflow/instance/flowChart/' + id,
     method: 'get'
   });
 };
 
 /**
- * 删除
- * @param instanceIds 流程实例id
- * @returns
+ * 流程变量
  */
-export const deleteByInstanceIds = (instanceIds: Array<string | number> | string | number) => {
+export const instanceVariable = (id: string | number): AxiosPromise<Record<string, any>> => {
   return request({
-    url: `/workflow/instance/deleteByInstanceIds/${instanceIds}`,
-    method: 'delete'
+    url: '/workflow/instance/variable/' + id,
+    method: 'get'
   });
 };
 
 /**
- * 删除历史流程实例
- * @param instanceIds
+ * 按业务主键查实例（业务列表页判断是否已发起）
  */
-export const deleteHisByInstanceIds = (instanceIds: Array<string | number> | string | number) => {
+export const instanceByBusinessId = (businessId: string | number): AxiosPromise<FlowInstanceVO> => {
   return request({
-    url: `/workflow/instance/deleteHisByInstanceIds/${instanceIds}`,
-    method: 'delete'
+    url: '/workflow/instance/business/' + businessId,
+    method: 'get'
   });
 };
 
-/**
- * 作废流程
- * @param data 参数
- * @returns
- */
-export const invalid = (data: any) => {
+/** 激活实例 */
+export const activeInstance = (id: string | number) => {
   return request({
-    url: `/workflow/instance/invalid`,
-    method: 'post',
-    data: data
+    url: '/workflow/instance/active/' + id,
+    method: 'put'
   });
 };
-/**
- * 修改流程变量
- * @param data 参数
- * @returns
- */
-export const updateVariable = (data: any) => {
+
+/** 挂起实例 */
+export const unActiveInstance = (id: string | number) => {
   return request({
-    url: `/workflow/instance/updateVariable`,
-    method: 'put',
-    data: data
+    url: '/workflow/instance/unActive/' + id,
+    method: 'put'
+  });
+};
+
+/** 删除实例（多个用逗号分隔） */
+export const delInstance = (ids: string | number | Array<string | number>) => {
+  return request({
+    url: '/workflow/instance/' + ids,
+    method: 'delete'
   });
 };

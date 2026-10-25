@@ -3,11 +3,8 @@ import { AxiosPromise } from 'axios';
 import { CategoryVO, CategoryForm, CategoryQuery, CategoryTreeVO } from '@/api/workflow/category/types';
 
 /**
- * 查询流程分类列表
- * @param query
- * @returns {*}
+ * 查询流程分类列表（平铺，前端用 handleTree 组树）
  */
-
 export const listCategory = (query?: CategoryQuery): AxiosPromise<CategoryVO[]> => {
   return request({
     url: '/workflow/category/list',
@@ -18,7 +15,6 @@ export const listCategory = (query?: CategoryQuery): AxiosPromise<CategoryVO[]> 
 
 /**
  * 查询流程分类详细
- * @param categoryId
  */
 export const getCategory = (categoryId: string | number): AxiosPromise<CategoryVO> => {
   return request({
@@ -29,7 +25,6 @@ export const getCategory = (categoryId: string | number): AxiosPromise<CategoryV
 
 /**
  * 新增流程分类
- * @param data
  */
 export const addCategory = (data: CategoryForm) => {
   return request({
@@ -41,7 +36,6 @@ export const addCategory = (data: CategoryForm) => {
 
 /**
  * 修改流程分类
- * @param data
  */
 export const updateCategory = (data: CategoryForm) => {
   return request({
@@ -53,9 +47,8 @@ export const updateCategory = (data: CategoryForm) => {
 
 /**
  * 删除流程分类
- * @param categoryId
  */
-export const delCategory = (categoryId: string | number | Array<string | number>) => {
+export const delCategory = (categoryId: string | number) => {
   return request({
     url: '/workflow/category/' + categoryId,
     method: 'delete'
@@ -63,14 +56,11 @@ export const delCategory = (categoryId: string | number | Array<string | number>
 };
 
 /**
- * 获取流程分类树列表
- * @param query 流程实例id
- * @returns
+ * 流程分类树（设计器里的分类下拉，后端已组好树）
  */
-export const categoryTree = (query?: CategoryForm): AxiosPromise<CategoryTreeVO[]> => {
+export const categoryTree = (): AxiosPromise<CategoryTreeVO[]> => {
   return request({
-    url: `/workflow/category/categoryTree`,
-    method: 'get',
-    params: query
+    url: '/workflow/category/tree',
+    method: 'get'
   });
 };
