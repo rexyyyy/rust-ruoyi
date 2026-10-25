@@ -2,7 +2,7 @@
 name = "codegen"
 version = "0.2.0"
 edition = "2021"
-description = "RuoYi-Rust 代码生成器引擎：读取 PostgreSQL 元数据，按模板生成 actix-web + sea-orm 后端代码与 Vue3 前端代码"
+description = "RuoYi-Rust 代码生成器引擎：读取 PostgreSQL/MySQL 元数据，按模板生成 actix-web + sea-orm 后端代码与 Vue3 前端代码"
 
 # 既作为库被 backend 依赖，也可独立命令行运行
 [lib]
@@ -13,13 +13,20 @@ path = "src/lib.rs"
 name = "codegen-cli"
 path = "src/main.rs"
 
+# 数据库驱动按 feature 选择，默认 mysql（与 backend 保持一致）。
+# backend 以 default-features = false 引入本库，并把自己的方言 feature 透传过来，
+# 因此默认构建只编入 mysql 驱动，只有切到 PostgreSQL 时才编入 pg 驱动。
+[features]
+default = ["mysql"]
+mysql = ["sea-orm/sqlx-mysql"]
+postgres = ["sea-orm/sqlx-postgres"]
+
 [dependencies]
 # —— 与 backend 保持同一套 ORM 与运行时，避免「生成的东西和主项目不是一套」——
-# 注意：`default-features = false` 会连 SQLx 的 postgres 驱动一起关掉，
-# 必须显式打开 `sqlx-postgres`，否则运行时报 "has no supporting driver"。
+# 驱动 feature 由上面的 [features] 控制，不在这里硬编码（否则会与 backend 的
+# feature 合并，导致默认构建同时带上两个驱动）。
 sea-orm = { version = "1.1", default-features = false, features = [
     "runtime-tokio-native-tls",
-    "sqlx-postgres",
     "macros",
     "with-chrono",
 ] }

@@ -82,11 +82,11 @@ profile 优先级：命令行 `profile=dev` > 环境变量 `profile` > 默认 de
 ## 无 MySQL 环境时的回归方式
 
 ```bash
-# MySQL 版二进制
-cd backend && cargo build --no-default-features --features mysql --bin ruoyi_rust_dev
+# 默认 MySQL 版二进制（features 默认已含 mysql）
+cd backend && cargo build --bin ruoyi_rust_dev
 
-# 默认 PostgreSQL 版（切回前把 database_url 改回 postgres://）
-cargo check --bin ruoyi_rust_dev
+# PostgreSQL 版（先改 application-*.yml 的 database_url 为 postgres://）
+cargo check --bin ruoyi_rust_dev --no-default-features --features postgresql
 ```
 
 数据库侧无法用单测覆盖时，可用仓库根目录的 `smoke_mysql.ps1` 做端到端接口冒烟（登录 + 71 项读写接口，需后端 60800 与 Redis 就绪）。

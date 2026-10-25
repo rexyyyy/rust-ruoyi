@@ -13,7 +13,9 @@ sea-orm = { version = "1.1", default-features = false, features = ["macros", "ru
 tokio = { version = "1", default-features = false, features = ["full"] }
 
 [features]
-default = ["postgres", "runtime-tokio-native-tls"]
+# 宿主 crate（backend）用 default-features = false 自行选择数据库驱动，
+# 这里的默认值与 backend 保持一致的 MySQL；切换 PostgreSQL 时由 backend 开启 postgres feature。
+default = ["mysql", "runtime-tokio-native-tls"]
 
 #databases
 mysql = ["sea-orm/sqlx-mysql"]

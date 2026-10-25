@@ -11,15 +11,23 @@ path = "src/main.rs"
 name = "ruoyi_rust_dev"
 path = "src/main.rs"
 
-# 双方言支持：postgresql（默认）/ mysql。连接串（postgres:// 或 mysql://）决定实际后端，
+# 双方言支持：mysql（默认）/ postgresql。连接串（mysql:// 或 postgres://）决定实际后端，
 # 原生 SQL 经 crate::db::raw_stmt 按后端自动改写占位符（$N -> ?）。
+# 切到 PostgreSQL：cargo build --no-default-features --features postgresql
+#
+# 注：codegen / sea-orm-adapter 均以 default-features = false 引入，各自的驱动 feature
+# 由下面统一透传，保证默认构建只编入 mysql 驱动，不会因 feature 合并再带回 pg 驱动。
 [features]
-default = ["postgresql"]
-postgresql = ["sea-orm/sqlx-postgres", "sea-orm-adapter/postgres"]
-mysql = ["sea-orm/sqlx-mysql", "sea-orm-adapter/mysql"]
+default = ["mysql"]
+mysql = ["sea-orm/sqlx-mysql", "sea-orm-adapter/mysql", "codegen/mysql"]
+postgresql = [
+    "sea-orm/sqlx-postgres",
+    "sea-orm-adapter/postgres",
+    "codegen/postgres",
+]
 
 [dependencies]
-codegen = { path = "../codegen" }
+codegen = { path = "../codegen", default-features = false }
 actix = "0.13"
 actix-tls = "3.4"
 actix-utils = "3"

@@ -37,10 +37,11 @@ pub async fn detail(id: web::Path<String>) -> impl Responder {
 #[post("{{ routes.add }}")]
 pub async fn add({% if create_by_expr != "" %}current_user: CurrentUser, {% endif %}arg: web::Json<{{ class_name }}AddDTO>) -> impl Responder {
     let mut data = {{ class_name }}::from(arg.0);
-    // 根据需求可以使给主键填业务流水号（按日期前缀取最大号 +1），放开下面两行即可：
-    //let a = crate::modules::system::service::ServiceContext::get_table_maxid("{{ pk.column_name }}", "{{ table_name }}").await ;
-    //{% if pk.rust_type == "String" %}data.{{ pk.column_name }} = a.to_string();
-{% else %}    //data.{{ pk.column_name }} = a;
+    // 主键默认已在实体 From<DTO> 里填雪花 ID。如需改为「表内自增（max+1）」做主键，
+    // 放开下面一行：get_table_maxid 默认**不加日期前缀**，需 yyyyMMdd 前缀时
+    // 改用 get_table_maxid_with_date_prefix（同参数）。
+    //{% if pk.rust_type == "String" %}data.{{ pk.column_name }} = crate::modules::system::service::ServiceContext::get_table_maxid("{{ pk.column_name }}", "{{ table_name }}").await.to_string();
+{% else %}    //data.{{ pk.column_name }} = crate::modules::system::service::ServiceContext::get_table_maxid("{{ pk.column_name }}", "{{ table_name }}").await;
 {% endif %}{% if create_by_expr != "" %}    data.create_by = Some({{ create_by_expr }});
 {% endif %}    let affected = match service().add(&data).await {
         Ok(v) => v,

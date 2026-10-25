@@ -44,9 +44,12 @@ pub async fn detail(menu_id: web::Path<String>) -> impl Responder {
 #[post("/menu")]
 pub async fn add(arg: actix_web_validator::Json<MenuAddDTO>) -> impl Responder {
     let mut data = SysMenu::from(arg.0);
-
-    let a = crate::modules::system::service::ServiceContext::get_table_maxid("menu_id","sys_menu").await ;
-    data.menu_id = crate::util::idseq::next_id();
+    // 菜单主键走「表内自增」：get_table_maxid 默认不加日期前缀，即 max(menu_id) + 1，
+    // 与原实现保持同一量级（不用雪花 ID，避开前端路由/排序依赖旧 id 的问题）。
+    // 注意：返回值必须真正赋给主键；旧代码查完就丢、又被雪花 ID 覆盖，等于白跑一次聚合查询。
+    data.menu_id =
+        crate::modules::system::service::ServiceContext::get_table_maxid("menu_id", "sys_menu")
+            .await;
 
     if data.path.is_none() {
         data.path = Some("".to_string());

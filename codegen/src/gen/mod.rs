@@ -136,9 +136,10 @@ mod tests {
         }
     }
 
-    /// 生成的 controller 的 add 里应带有 get_table_maxid 注释，且类型适配主键类型
+    /// 生成的 controller 的 add 应保留「表内自增主键」提示（get_table_maxid），
+    /// 且按主键类型给出正确的赋值写法（String 主键需 to_string）。
     #[test]
-    fn controller_has_get_table_maxid_hint() {
+    fn controller_has_table_maxid_hint() {
         for (db_type, _rust_type) in [("int8", "i64"), ("varchar", "String")] {
             let table = sample_table(db_type);
             let opt = GenOptions {
@@ -154,12 +155,14 @@ mod tests {
                 .find(|f| f.path.ends_with("course_controller.rs"))
                 .expect("controller file generated");
             assert!(
-                controller.content.contains("get_table_maxid"),
-                "controller 应包含 get_table_maxid 注释"
+                controller.content.contains(
+                    "data.course_id = crate::modules::system::service::ServiceContext::get_table_maxid(\"course_id\", \"demo_course\")"
+                ),
+                "controller 应包含 get_table_maxid 主键赋值提示"
             );
             assert!(
-                controller.content.contains("data.course_id = a"),
-                "controller 应包含主键赋值注释"
+                controller.content.contains("get_table_maxid_with_date_prefix"),
+                "controller 应提示带日期前缀的变体"
             );
         }
     }

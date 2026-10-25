@@ -30,7 +30,7 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 | 缓存 | 默认 Moka（进程内 TinyLFU + TTL），可切换 Redis |
 | 定时任务 | 自研轮询调度器（cron 表达式，方言无关、不绑定特定数据库） |
 | 前端 | plus-ui 5.x（Vue 3 + TypeScript + Element Plus + Vite + Pinia + UnoCSS + vxe-table） |
-| 数据库 | 默认 PostgreSQL（可切换 MySQL） |
+| 数据库 | 默认 MySQL 8（可切换 PostgreSQL） |
 | 代码生成 | codegen 子项目（读表结构生成前后端代码） |
 
 > 仓库早期自带的旧版 Vue3 前端已归档至 `0.1` 分支，主线前端统一为 plus-ui 5.x。
@@ -58,7 +58,7 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 **系统监控**：服务监控（CPU/内存/磁盘）、在线用户、缓存监控、操作日志、登录日志
 **通用能力**：文件上传、Excel 导入导出（rust_xlsxwriter / calamine）、WebSocket 通讯示例、SSE 服务端推送
 **定时任务**：自研「方言无关轮询调度器」（替代 RuoYi ruoyi-job 与原 apalis 引擎），支持 cron 表达式与并发限制，任务数据存在业务库（PostgreSQL / MySQL 均可）
-**多数据库**：基于 SeaORM，同一套代码支持 PostgreSQL / MySQL（当前默认 PostgreSQL，通过 Cargo features 切换，切换后建议回归测试）
+**多数据库**：基于 SeaORM，同一套代码支持 MySQL / PostgreSQL（当前默认 MySQL，通过 Cargo features 切换；连接串 scheme 决定实际方言，切换后建议回归测试）
 **缓存**：默认 Moka 进程内缓存（登录态、字典/菜单/参数等业务缓存）；`cache_type` 可切换为 Redis，用于多实例共享会话
 **代码生成**：codegen 子项目读取数据库表结构，按模板生成后端（controller/service/domain）+ 前端页面 + SQL 菜单脚本
 **扩展示例**：微信公众号消息接入（wx 模块）、demo 业务模块（course 课程管理，演示从建表到生成代码的全流程）
@@ -93,9 +93,10 @@ rust-ruoyi 是使用 **Rust** 对若依（RuoYi）系统的**重写**，并搭�
 | 依赖 | 要求 |
 |---|---|
 | Rust 工具链 | 含 `cargo` |
-| PostgreSQL | 13~16，建议设置 `lc_messages = 'en_US.UTF-8'` |
+| MySQL | 8.0+（默认方言），字符集建议 `utf8mb4` |
+| PostgreSQL | 13~16（可选，切到 PG 需重新编译），建议设置 `lc_messages = 'en_US.UTF-8'` |
 | Redis | **可选**。默认走 Moka 进程内缓存，单机启动无需 Redis；多实例共享会话时才用到（届时把 `cache_type` 改为 `redis`） |
-| 库表初始化 | 导入 `script/postgresql-5.x-public.sql`（默认库名 `ruoyirust`） |
+| 库表初始化 | MySQL：导入 `script/ry_vue_5.X.sql`（默认库名 `ruoyirust`）；PostgreSQL：改写连接串后导入 `script/postgresql-5.x-public.sql` |
 | 前端 | Node >= 20 + pnpm（目录 `plus-ui-5.X`） |
 
 **后端**
@@ -114,7 +115,16 @@ cargo run --bin ruoyi_rust_prod -- profile=prod
 powershell -File build_backend.ps1
 ```
 
-默认连接串见 `application-dev.yml`：`postgres://postgres:123456@localhost:5434/ruoyirust`。按需修改为本机环境。
+默认连接串见 `application-dev.yml`：`mysql://root:123456@127.0.0.1:3306/ruoyirust`。按需修改为本机环境。
+
+**方言切换**（Cargo features，默认 `mysql`）
+
+| 目标方言 | 连接串 | 构建命令 |
+|---|---|---|
+| MySQL（默认） | `mysql://user:pass@host:3306/ruoyirust` | `cargo build` |
+| PostgreSQL | `postgres://user:pass@host:5434/ruoyirust` | `cargo build --no-default-features --features postgresql` |
+
+驱动按 feature 编进二进制：用 MySQL 连接串启动只编了 PG 驱动的二进制（反之亦然）会在连库前直接报错并提示正确的构建命令。手写原生 SQL 统一按 PostgreSQL 风格书写（`$N` 占位符），MySQL 下由 `crate::db::raw_stmt` 自动改写为 `?`。
 
 **缓存后端选择**（`application.yml` 的 `cache_type`）
 
@@ -169,19 +179,21 @@ rust-ruoyi 提供**两种**代码生成方式，底层都由 `codegen` crate（�
 
 适合无前端环境或自动化流水线。必填 `--database-url` 与 `--table`，其余可选。**建议先用 `--preview` 预览、确认无误再落盘。**
 
+> codegen-cli 默认只编入 MySQL 驱动（与 backend 一致）；读取 PostgreSQL 元数据时加 `--features postgres`（搭配 `--no-default-features`）。
+
 ```bash
 cd codegen
 
 # 1) 预览（不落盘，打印将生成的文件清单）
 cargo run --bin codegen-cli -- \
-  --database-url postgres://postgres:123456@localhost:5434/ruoyirust \
+  --database-url mysql://root:123456@127.0.0.1:3306/ruoyirust \
   --table demo_course \
   --module demo --business course --function 课程 \
   --preview
 
 # 2) 生成到指定目录
 cargo run --bin codegen-cli -- \
-  --database-url postgres://postgres:123456@localhost:5434/ruoyirust \
+  --database-url mysql://root:123456@127.0.0.1:3306/ruoyirust \
   --table demo_course \
   --module demo --business course --function 课程 \
   --out D:/tmp/gen-out

@@ -43,7 +43,7 @@ pub use sys_user_service::*;
 
 use chrono::{Datelike, Local};
 use std::sync::Arc;
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
+use sea_orm::ConnectionTrait;
 /// CONTEXT is all of the service struct
 pub static CONTEXT: Lazy<ServiceContext> = Lazy::new(|| ServiceContext::default());
 
@@ -90,10 +90,28 @@ pub struct ServiceContext {
 }
 
 impl ServiceContext {
-    // 获取业务流水号
-    // 注意：idfield/table_name 会被直接拼进 SQL，仅允许安全的标识符（字母/数字/下划线），
-    // 防御将来被传入用户可控输入时产生 SQL 注入。
+    /// 取表内主键的**下一个值**（业务流水号）。
+    ///
+    /// 默认**不加日期前缀**，即 `max(id) + 1`，空表从 1 开始；
+    /// 需要 `yyyyMMdd` 前缀时改用 [`Self::get_table_maxid_with_date_prefix`]。
+    ///
+    /// 注意：`idfield` / `table_name` 会被直接拼进 SQL，仅允许安全的标识符
+    /// （字母/数字/下划线），防御将来被传入用户可控输入时产生 SQL 注入。
     pub async fn get_table_maxid(idfield: &str, table_name: &str) -> i64 {
+        Self::table_maxid(idfield, table_name, false).await
+    }
+
+    /// 同上，但主键带 `yyyyMMdd` 日期前缀 + 5 位序号（如 `2026102500001`）。
+    pub async fn get_table_maxid_with_date_prefix(idfield: &str, table_name: &str) -> i64 {
+        Self::table_maxid(idfield, table_name, true).await
+    }
+
+    /// [`get_table_maxid`] / [`get_table_maxid_with_date_prefix`] 的公共实现。
+    ///
+    /// `CAST(... AS BIGINT)` 会在 MySQL 下被 [`crate::db::raw_stmt`] 改写成
+    /// `CAST(... AS SIGNED)`：MySQL 的 `UNSIGNED` 结果列 sqlx 会解成 `u64`，
+    /// 用 `i64` 取值会失败并静默回落成 0（主键恒为 1 而冲突）。
+    async fn table_maxid(idfield: &str, table_name: &str, with_date_prefix: bool) -> i64 {
         let is_ident = |s: &str| {
             !s.is_empty()
                 && s.len() <= 64
@@ -107,35 +125,43 @@ impl ServiceContext {
             );
             return 0;
         }
-        let local = Local::now();
-        let year = local.year();
-        let month = local.month();
-        let day = local.day();
-        let prefix = format!("{:04}{:02}{:02}", year, month, day);
 
-        let query_perms = format!(
-            "select max(CAST({} AS BIGINT)) as max_id from {} where CAST({} AS TEXT) like '{}%'",
-            idfield, table_name, idfield, prefix
-        );
+        // 是否加日期前缀完全由入参决定：不加时全表取 max，不拼 like 条件。
+        let prefix = if with_date_prefix {
+            let local = Local::now();
+            Some(format!(
+                "{:04}{:02}{:02}",
+                local.year(),
+                local.month(),
+                local.day()
+            ))
+        } else {
+            None
+        };
+
+        let sql = match &prefix {
+            Some(p) => format!(
+                "select max(CAST({} AS BIGINT)) as max_id from {} where CAST({} AS TEXT) like '{}%'",
+                idfield, table_name, idfield, p
+            ),
+            None => format!(
+                "select max(CAST({} AS BIGINT)) as max_id from {}",
+                idfield, table_name
+            ),
+        };
+
         let db = crate::db::db().expect("[ruoyi_rust] sea-orm db not initialized");
-        let max_id: i64 = match db
-            .query_one(crate::db::raw_stmt( query_perms, vec![]))
-            .await
-        {
+        let max_id: i64 = match db.query_one(crate::db::raw_stmt(sql, vec![])).await {
             Ok(Some(qr)) => qr.try_get::<i64>("", "max_id").unwrap_or(0),
             _ => 0,
         };
 
-        let newid: i64;
-        if max_id <= 0 {
-            let new_str = format!("{:04}{:02}{:02}{:05}", year, month, day, 1);
-            let s = new_str.to_string();
-            //字符串转32位有符号整型
-            newid = s.parse::<i64>().unwrap();
-        } else {
-            newid = max_id + 1;
+        match prefix {
+            // 日期前缀：空表时从 ...00001 起，否则在前缀内递增。
+            Some(p) if max_id <= 0 => format!("{}{:05}", p, 1).parse::<i64>().unwrap_or(0),
+            // 无前缀：空表时 1，否则 max+1。
+            _ => max_id.saturating_add(1),
         }
-        newid.into()
     }
 }
 

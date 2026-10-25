@@ -7,11 +7,11 @@ base_api: "/dev-api"
 web_redis_url: "redis://localhost:6379" #这是db0
 
 #后台用数据库地址（运行时覆盖，改这里无需重编译）
-# PostgreSQL（原来的本地库，切回时取消下一行注释并注释掉 MySQL 行）
-#database_url: "postgres://postgres:123456@localhost:5434/ruoyirust"
-# MySQL 8（本机 3306，库 ruoyirust 由 script/ry_vue_5.X.sql 初始化）
-# 注意：需用 `cargo build --no-default-features --features mysql` 编译，二进制才带 MySQL 驱动
+# 默认方言 MySQL 8（与 Cargo 默认 feature 一致），本机 3306，库 ruoyirust 由 script/ry_vue_5.X.sql 初始化
 database_url: "mysql://root:123456@127.0.0.1:3306/ruoyirust"
+# 切到 PostgreSQL（本地库）时：取消下一行注释并注释掉上面的 MySQL 行，
+# 并用 `cargo run --no-default-features --features postgresql` 重新编译，二进制才带 PG 驱动
+#database_url: "postgres://postgres:123456@localhost:5434/ruoyirust"
 
 
 # 是否启用登录验证码（true 时登录必须带 code+uuid，验证码存 redis 前缀 login_captcha）
