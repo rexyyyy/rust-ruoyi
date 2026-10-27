@@ -18,8 +18,6 @@ components.d.ts
 *.log
 be_mysql*.log
 backend/uploads/
-# JWT 签名密钥属机密，不入库（首次启动由后端自动生成）
-backend/jwt_secret.key
 
 # ================= 临时文件 =================
 backend/commit_msg.txt
