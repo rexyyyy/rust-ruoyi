@@ -1,1 +1,4 @@
 /target
+# JWT 密钥已回归 application*.yml（默认值随仓库分发，生产用环境变量 JWT_SECRET 覆盖）。
+# 历史上程序曾自动生成 ./jwt_secret.key，此文件属运行产物，不应再入库。
+jwt_secret.key

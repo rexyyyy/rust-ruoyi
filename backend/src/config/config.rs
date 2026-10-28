@@ -16,8 +16,22 @@ fn default_cache_maintain_secs() -> u64 {
     60
 }
 
+/// 开箱即用的默认 JWT 密钥（与 `application.yml` 里 `jwt_secret` 的默认值一致）。
+///
+/// **定位**：本项目是开源指南/教学项目，目标是「clone 下来 `cargo run` 就能跑」，
+/// 因此密钥以明文默认值随仓库分发，避免新人卡在「先配环境变量才能启动」这一步。
+/// **生产部署必须替换**：优先用环境变量 `JWT_SECRET` 注入，或直接改 `application-*.yml`；
+/// 非环境变量来源在 release 模式下启动时会打印醒目告警。
+pub const DEFAULT_JWT_SECRET: &str =
+    "d921104b85cf0b33450f00608b499e5e52f8828ec6ebbda7cc5edcdd83d0baea";
+
 /// Config
+///
+/// 容器级 `#[serde(default = ...)]`：yml 里**缺失**的字段自动取 [`ApplicationConfig::builtin`]
+/// 的对应值，不再因为少写一行就整体解析失败（`expect("load config file fail")`）。
+/// 注意区分：yml 语法/类型错误仍然会 panic（这类错误必须显式暴露，静默兜底反而坑人）。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default = "ApplicationConfig::builtin")]
 pub struct ApplicationConfig {
     pub debug: bool,
     pub server_url: String,
@@ -80,6 +94,57 @@ pub fn global() -> &'static Arc<ApplicationConfig> {
 }
 
 impl ApplicationConfig {
+    /// 内置默认配置（yml 缺字段时的取值，也是「零配置启动」的落点）。
+    ///
+    /// 与 `application.yml` 保持同值：默认 debug、60800 端口、`/dev-api` 前缀、
+    /// MySQL 本机库、moka 进程内缓存（不依赖 Redis 即可启动）。
+    fn builtin() -> Self {
+        Self {
+            debug: true,
+            server_url: "0.0.0.0:60800".to_string(),
+            base_api: "/dev-api".to_string(),
+            web_redis_url: "redis://127.0.0.1:6379".to_string(),
+            database_url: "mysql://root:123456@127.0.0.1:3306/ruoyirust".to_string(),
+            logic_column: "del".to_string(),
+            logic_un_deleted: 0,
+            logic_deleted: 1,
+            log_dir: "target/logs/".to_string(),
+            log_temp_size: "20MB".to_string(),
+            log_pack_compress: String::new(),
+            log_rolling_type: "KeepNum(20)".to_string(),
+            log_chan_len: Some(100_000),
+            log_level: "info".to_string(),
+            sms_cache_send_key_prefix: "sms:send:".to_string(),
+            jwt_secret: DEFAULT_JWT_SECRET.to_string(),
+            white_list_api: vec![
+                "/".to_string(),
+                "/dev-api/auth/login".to_string(),
+                "/dev-api/auth/logout".to_string(),
+                "/dev-api/auth/code".to_string(),
+                "/dev-api/auth/register".to_string(),
+                "/dev-api/auth/tenant/list".to_string(),
+                "/dev-api/resource/sse".to_string(),
+                "/dev-api/resource/sse/close".to_string(),
+                "/dev-api/captchaImage".to_string(),
+                "/dev-api/login".to_string(),
+                "/dev-api/logout".to_string(),
+                "/dev-api/register".to_string(),
+                "/dev-api/profile/avatar".to_string(),
+            ],
+            cache_type: "moka".to_string(),
+            cache_max_capacity_mb: 64,
+            cache_ttl_secs: 0,
+            cache_time_to_idle_secs: 0,
+            cache_maintain_secs: 60,
+            login_fail_retry: 3,
+            login_fail_retry_wait_sec: 30,
+            captcha_enabled: true,
+            captcha_expired_min: 2,
+            token_expired_min: 60,
+            cors_allowed_origins: Vec::new(),
+        }
+    }
+
     /// 真正的文件加载逻辑，**只应由 [`global`] 调用**。
     /// 外部需要配置请走 `ApplicationConfig::default()` 或 [`global`]，避免产生第二份实例。
     fn load() -> Self {
@@ -124,9 +189,17 @@ impl ApplicationConfig {
         //load config
         let mut result: ApplicationConfig =
             serde_yaml::from_str(&*hash.to_string()).expect("load config file fail");
-        // 安全：JWT 密钥不再硬编码。优先读环境变量 JWT_SECRET；否则读取/生成
-        // 持久化的随机密钥文件（./jwt_secret.key），避免源码内弱密钥被离线爆破。
-        result.jwt_secret = resolve_jwt_secret(result.jwt_secret);
+        // JWT 密钥：yml 明文默认值（开箱即用） + 环境变量 JWT_SECRET 最高优先级覆盖。
+        // 单一来源、无外部文件依赖，保证 clone 后零配置即可启动。
+        let (secret, source) = resolve_jwt_secret(&result.jwt_secret);
+        result.jwt_secret = secret;
+        println!("[ruoyi_rust] jwt secret source: {source} (len={})", result.jwt_secret.len());
+        if source != "env:JWT_SECRET" {
+            println!(
+                "[ruoyi_rust] warn: JWT 密钥来自 {source}（仓库内置默认值）。\
+                 正式部署请设置环境变量 JWT_SECRET 或改写 application-*.yml 的 jwt_secret。"
+            );
+        }
         if result.debug {
             //println!("[ruoyi_rust] load config:{:?}", result);
             println!("[ruoyi_rust] ///////////////////// Start On Debug Mode ////////////////////////////");
@@ -147,39 +220,63 @@ impl Default for ApplicationConfig {
     }
 }
 
-/// 解析 JWT 密钥：
-/// 1) 环境变量 `JWT_SECRET` 非空 -> 直接使用（推荐生产用法）；
-/// 2) 配置文件里的值非空且不是历史弱默认值 -> 使用；
-/// 3) 否则读取 `./jwt_secret.key`，不存在则生成随机密钥并持久化（重启后 token 仍有效）。
-fn resolve_jwt_secret(current: String) -> String {
+/// 历史提交里泄露过的 / 一眼可猜的弱密钥，视同「未配置」，回落内置默认值。
+const WEAK_SECRETS: [&str; 4] = [
+    "ybgdefghijklmnopqrstuvwxyz",
+    "changeme",
+    "change-me",
+    "secret",
+];
+
+/// 解析 JWT 密钥，返回值 + 来源标记（便于启动时在日志里确认用的是哪一份）。
+///
+/// 优先级：
+/// 1) 环境变量 `JWT_SECRET` 非空 —— 最高优先级（生产推荐，不落盘、不入库）；
+/// 2) `application*.yml` 的 `jwt_secret` 非空且非弱值 —— 常规用法；
+/// 3) 否则取内置默认值 [`DEFAULT_JWT_SECRET`]。
+///
+/// **不再生成/读写 `jwt_secret.key`**：运行产物进过版本库反而更像「真密钥泄露」，
+/// 且多一层文件 IO 只增加部署复杂度。需要随机密钥时请自行 `JWT_SECRET=$(openssl rand -hex 32)`。
+fn resolve_jwt_secret(current: &str) -> (String, &'static str) {
     if let Ok(s) = std::env::var("JWT_SECRET") {
-        if !s.trim().is_empty() {
-            return s;
-        }
-    }
-    // 历史提交里泄露的弱默认值，视为未配置
-    const WEAK_DEFAULT: &str = "ybgdefghijklmnopqrstuvwxyz";
-    let cur = current.trim();
-    if !cur.is_empty() && cur != WEAK_DEFAULT {
-        return cur.to_string();
-    }
-    let path = "./jwt_secret.key";
-    if let Ok(s) = fs::read_to_string(path) {
-        let s = s.trim().to_string();
+        let s = s.trim();
         if !s.is_empty() {
-            return s;
+            return (s.to_string(), "env:JWT_SECRET");
         }
     }
-    // 用 uuid v4 拼接生成 256bit 随机十六进制串，无需额外依赖
-    let secret = format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    );
-    if let Err(e) = fs::write(path, &secret) {
-        println!("[ruoyi_rust] warn: failed to persist jwt secret to {path}: {e}");
-    } else {
-        println!("[ruoyi_rust] generated random JWT secret at {path}");
+    let cur = current.trim();
+    if !cur.is_empty() && !WEAK_SECRETS.contains(&cur) {
+        return (cur.to_string(), "yaml");
     }
-    secret
+    (DEFAULT_JWT_SECRET.to_string(), "builtin-default")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_defaults_are_runnable() {
+        let c = ApplicationConfig::builtin();
+        assert_eq!(c.base_api, "/dev-api");
+        assert_eq!(c.cache_type, "moka");
+        assert_eq!(c.jwt_secret, DEFAULT_JWT_SECRET);
+        assert!(c.white_list_api.contains(&"/dev-api/auth/login".to_string()));
+    }
+
+    #[test]
+    fn yaml_value_wins_over_builtin() {
+        let (s, src) = resolve_jwt_secret("abcdef0123456789");
+        assert_eq!(s, "abcdef0123456789");
+        assert_eq!(src, "yaml");
+    }
+
+    #[test]
+    fn weak_and_empty_fall_back_to_builtin() {
+        for weak in ["", "   ", "changeme", "ybgdefghijklmnopqrstuvwxyz"] {
+            let (s, src) = resolve_jwt_secret(weak);
+            assert_eq!(s, DEFAULT_JWT_SECRET, "weak={weak:?} 应回落内置默认值");
+            assert_eq!(src, "builtin-default");
+        }
+    }
 }

@@ -117,6 +117,29 @@ powershell -File build_backend.ps1
 
 默认连接串见 `application-dev.yml`：`mysql://root:123456@127.0.0.1:3306/ruoyirust`。按需修改为本机环境。
 
+**零环境变量启动（配置全部落在 yaml）**
+
+本项目定位**开源指南项目**，目标是「clone 下来 `cargo run` 就能跑」：所有运行必需配置都写在
+`backend/application.yml` + `backend/application-{profile}.yml`，**不需要预先设置任何环境变量**；
+环境变量仅作为可选覆盖手段。启动时日志会打印 `jwt secret source: yaml / builtin-default / env:JWT_SECRET`，
+便于一眼确认当前用的是哪一份配置。
+
+| 配置项 | 位置 | 开箱默认值 | 可选覆盖方式 |
+|---|---|---|---|
+| JWT 密钥 | `application.yml: jwt_secret` | 64 位十六进制演示值（随仓库分发） | 环境变量 `JWT_SECRET`（优先级最高，**生产推荐**） |
+| 数据库连接 | `application-dev.yml: database_url` | `mysql://root:123456@127.0.0.1:3306/ruoyirust` | 改 yml |
+| 服务端口 | `application.yml: server_url` | `0.0.0.0:60800` | 改 yml |
+| 缓存后端 | `application.yml: cache_type` | `moka`（进程内，无需 Redis） | 改 yml，切 `redis` 用于多实例 |
+| Redis 地址 | `application-dev.yml: web_redis_url` | `redis://127.0.0.1:6379`（仅 `cache_type=redis` 生效） | 改 yml |
+| profile | 命令行参数 `profile=dev` / 环境变量 `profile` | `dev` | 命令行或环境变量 |
+
+> yml 里**缺失**的配置项会自动取代码内置默认值（`ApplicationConfig::builtin`），不会因少写一行就启动失败；
+> 但 yml 语法/类型错误仍会直接报错退出 —— 这类错误需要显式暴露，静默兜底反而更难排查。
+>
+> ⚠️ 仓库中的 `jwt_secret` 是**演示值**，正式部署务必替换：用 `openssl rand -hex 32` 生成后写回 yml，
+> 或直接用环境变量 `JWT_SECRET` 注入。yml 留空 / 写成 `changeme` 这类弱值时，会自动回落到内置默认值。
+> 历史版本曾自动生成 `backend/jwt_secret.key`，该机制已移除（运行产物入库反而更像真密钥泄露），文件已删除。
+
 **方言切换**（Cargo features，默认 `mysql`）
 
 | 目标方言 | 连接串 | 构建命令 |

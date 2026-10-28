@@ -1,6 +1,13 @@
 
-vscode windows 运行
-首先在 PowerShell 下设置环境变量
+vscode windows 运行（零配置：不设任何环境变量也能直接跑）
+
+配置全部在 application.yml + application-{profile}.yml，默认 profile=dev，
+JWT 密钥等敏感项在 yaml 中已有开箱默认值，不需要先配环境变量。
+
+# 直接跑（默认 dev）
+cargo run --bin ruoyi_rust_dev
+
+# 可选：RUST_BACKTRACE 只为排错时开；profile 不设时默认 dev
 $env:RUST_BACKTRACE=1 ;
 $env:profile= "dev" ;
 

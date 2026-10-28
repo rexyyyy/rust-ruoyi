@@ -7,6 +7,11 @@ debug: false
 #相对应若依平台的VITE_APP_BASE_API
 base_api: "/prod-api"
 
+#JwtToken秘钥：prod **必须**改写（用 `openssl rand -hex 32` 生成），
+#或直接用环境变量 JWT_SECRET 注入（优先级最高，推荐）。
+#未设置时回落到 application.yml 的默认值 —— 那只是「保证能启动」的演示值，切勿直接上线。
+#jwt_secret: "请替换为随机强密钥，或设置环境变量 JWT_SECRET"
+
 #接口白名单（免登陆直接访问）
 #匹配规则与 application.yml 一致：先剥掉 base_api 再精确比较（或命中目录型前缀的路径段边界），
 #已移除旧的「子串 / 任意后缀」宽松匹配。注意条目必须与当前 base_api（/prod-api）一致。
